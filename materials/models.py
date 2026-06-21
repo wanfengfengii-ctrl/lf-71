@@ -41,9 +41,9 @@ class MaterialBatch(models.Model):
         return f'{self.batch_number} - {self.material_source}'
 
     def clean(self):
-        if self.diameter <= 0:
+        if self.diameter is not None and self.diameter <= 0:
             raise ValidationError({'diameter': '直径必须大于0'})
-        if self.initial_length <= 0:
+        if self.initial_length is not None and self.initial_length <= 0:
             raise ValidationError({'initial_length': '初始长度必须大于0'})
         super().clean()
 
@@ -123,12 +123,20 @@ class TensionTest(models.Model):
 
     def __str__(self):
         status = '已断裂' if self.is_broken else '正常'
-        return f'{self.batch.batch_number} - {self.tension_force}N - {status}'
+        batch_no = getattr(self, 'batch_id', None)
+        if batch_no:
+            try:
+                batch_info = str(self.batch.batch_number)
+            except Exception:
+                batch_info = f'#{batch_no}'
+        else:
+            batch_info = '未绑定批次'
+        return f'{batch_info} - {self.tension_force}N - {status}'
 
     def clean(self):
-        if self.tension_force <= 0:
+        if self.tension_force is not None and self.tension_force <= 0:
             raise ValidationError({'tension_force': '拉力值必须大于0'})
-        if self.elongation < 0:
+        if self.elongation is not None and self.elongation < 0:
             raise ValidationError({'elongation': '伸长量不能为负数'})
         if self.length_before_rebound is not None:
             if self.length_before_rebound <= 0:
@@ -136,38 +144,54 @@ class TensionTest(models.Model):
         if self.length_after_rebound is not None:
             if self.length_after_rebound <= 0:
                 raise ValidationError({'length_after_rebound': '回弹后长度必须大于0'})
-        if self.abnormal_break and not self.break_reason.strip():
-            raise ValidationError({'break_reason': '异常断裂必须填写原因'})
-        if self.is_broken:
-            previous_tests = TensionTest.objects.filter(
-                batch=self.batch,
-                is_broken=True
-            )
-            if self.pk:
-                previous_tests = previous_tests.exclude(pk=self.pk)
-            if previous_tests.exists():
-                raise ValidationError('该批次样本已断裂，不能继续新增测试记录')
-        else:
-            previous_broken = TensionTest.objects.filter(
-                batch=self.batch,
-                is_broken=True
-            )
-            if self.pk:
-                previous_broken = previous_broken.exclude(pk=self.pk)
-            if previous_broken.exists():
-                raise ValidationError('该批次样本已断裂，不能继续新增测试记录')
+        if self.abnormal_break:
+            if not self.break_reason or not str(self.break_reason).strip():
+                raise ValidationError({'break_reason': '异常断裂必须填写原因'})
+        batch_id = getattr(self, 'batch_id', None)
+        if batch_id:
+            if self.pk is None:
+                previous_broken = TensionTest.objects.filter(
+                    batch_id=batch_id, is_broken=True
+                )
+                if previous_broken.exists():
+                    raise ValidationError('该批次样本已断裂，不能继续新增测试记录')
+            else:
+                if self.is_broken:
+                    previous_tests = TensionTest.objects.filter(
+                        batch_id=batch_id, is_broken=True
+                    ).exclude(pk=self.pk)
+                    if previous_tests.exists():
+                        raise ValidationError('该批次样本已断裂，不能继续新增测试记录')
+                else:
+                    previous_broken = TensionTest.objects.filter(
+                        batch_id=batch_id, is_broken=True
+                    ).exclude(pk=self.pk)
+                    if previous_broken.exists():
+                        raise ValidationError('该批次样本已断裂，不能继续新增测试记录')
         super().clean()
 
     def save(self, *args, **kwargs):
-        self.full_clean()
         if (self.length_before_rebound is not None
                 and self.length_after_rebound is not None
                 and self.elongation > 0):
-            initial = self.batch.initial_length
-            elastic_deformation = self.length_before_rebound - initial
-            if elastic_deformation > 0:
-                rebound = self.length_before_rebound - self.length_after_rebound
-                self.rebound_rate = round((rebound / elastic_deformation) * 100, 2)
+            batch_id = getattr(self, 'batch_id', None)
+            if batch_id:
+                try:
+                    if self.batch_id and MaterialBatch.objects.filter(pk=self.batch_id).exists():
+                        initial = MaterialBatch.objects.get(pk=self.batch_id).initial_length
+                    else:
+                        initial = None
+                except MaterialBatch.DoesNotExist:
+                    initial = None
+            else:
+                initial = None
+            if initial is not None:
+                elastic_deformation = self.length_before_rebound - initial
+                if elastic_deformation > 0:
+                    rebound = self.length_before_rebound - self.length_after_rebound
+                    self.rebound_rate = round((rebound / elastic_deformation) * 100, 2)
+                else:
+                    self.rebound_rate = None
             else:
                 self.rebound_rate = None
         else:

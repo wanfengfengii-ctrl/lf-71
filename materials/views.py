@@ -113,6 +113,9 @@ class TensionTestCreateView(CreateView):
 
     def dispatch(self, request, *args, **kwargs):
         self.batch = get_object_or_404(MaterialBatch, pk=kwargs['batch_pk'])
+        if self.batch.is_broken:
+            messages.error(request, '该批次样本已断裂，无法新增测试记录')
+            return redirect('materials:batch_detail', pk=self.batch.pk)
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):

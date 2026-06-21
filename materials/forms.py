@@ -86,8 +86,9 @@ class TensionTestForm(forms.ModelForm):
         break_reason = cleaned_data.get('break_reason')
         is_broken = cleaned_data.get('is_broken')
 
-        if abnormal_break and break_reason and not break_reason.strip():
-            self.add_error('break_reason', '异常断裂必须填写原因')
+        if abnormal_break:
+            if not break_reason or not str(break_reason).strip():
+                self.add_error('break_reason', '异常断裂必须填写原因')
 
         batch = self.batch or (self.instance.batch if self.instance.pk else None)
         if batch:
