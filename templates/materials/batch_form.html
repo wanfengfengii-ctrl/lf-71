@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}{% if object.pk %}编辑{% else %}新增{% endif %}材料批次 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>{% if object.pk %}编辑材料批次{% else %}新增材料批次{% endif %}</h1>
+    <a href="{% if object.pk %}{% url 'materials:batch_detail' object.pk %}{% else %}{% url 'materials:batch_list' %}{% endif %}" class="btn btn-secondary">
+        返回
+    </a>
+</div>
+
+<div class="card" style="max-width: 720px;">
+    <form method="post" novalidate>
+        {% csrf_token %}
+        {% for field in form %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">
+                {{ field.label }}
+                {% if field.field.required %}<span class="required">*</span>{% endif %}
+            </label>
+            {% if field.field.widget.input_type == 'textarea' or field.name == 'description' %}
+                <textarea name="{{ field.name }}"
+                          id="{{ field.id_for_label }}"
+                          class="form-control {% if field.errors %}error{% endif %}"
+                          {% if field.field.required %}required{% endif %}
+                          rows="3">{{ field.value|default:'' }}</textarea>
+            {% else %}
+                <input type="{{ field.field.widget.input_type|default:'text' }}"
+                       name="{{ field.name }}"
+                       id="{{ field.id_for_label }}"
+                       class="form-control {% if field.errors %}error{% endif %}"
+                       value="{{ field.value|default:'' }}"
+                       {% if field.field.required %}required{% endif %}>
+            {% endif %}
+            {% if field.help_text %}
+                <div style="color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;">{{ field.help_text }}</div>
+            {% endif %}
+            {% if field.errors %}
+                {% for error in field.errors %}
+                    <div class="error-text">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                {% if object.pk %}保存修改{% else %}创建批次{% endif %}
+            </button>
+            <a href="{% if object.pk %}{% url 'materials:batch_detail' object.pk %}{% else %}{% url 'materials:batch_list' %}{% endif %}" class="btn btn-secondary">
+                取消
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}

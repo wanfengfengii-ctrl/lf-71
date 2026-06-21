@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}删除材料批次 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>删除材料批次</h1>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <div class="alert alert-warning">
+        <strong>警告：</strong>此操作将永久删除该材料批次及其所有测试记录，且无法恢复。
+    </div>
+    <div style="margin: 1.5rem 0; padding: 1rem; background: #f9fafb; border-radius: 8px;">
+        <div style="font-size: 1.1rem; font-weight: 600; color: #1e3a5f; margin-bottom: 0.5rem;">
+            {{ object.batch_number }}
+        </div>
+        <div style="color: #4b5563;">
+            <div><strong>材料来源：</strong>{{ object.material_source }}</div>
+            <div><strong>直径：</strong>{{ object.diameter }} mm</div>
+            <div><strong>初始长度：</strong>{{ object.initial_length }} mm</div>
+            <div><strong>测试记录：</strong>{{ object.test_count }} 条</div>
+        </div>
+    </div>
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-actions">
+            <button type="submit" class="btn btn-danger">确认删除</button>
+            <a href="{% url 'materials:batch_detail' object.pk %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,215 @@
+{% extends 'base.html' %}
+{% block title %}{% if object.pk %}编辑{% else %}新增{% endif %}拉伸测试记录 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>
+        {% if object.pk %}编辑拉伸测试记录{% else %}新增拉伸测试记录{% endif %}
+        <small style="font-size: 1rem; color: #6b7280; font-weight: normal;">
+            - {{ batch.batch_number }} ({{ batch.material_source }})
+        </small>
+    </h1>
+    <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">
+        返回批次详情
+    </a>
+</div>
+
+{% if batch.is_broken and not object.pk %}
+<div class="alert alert-warning">
+    该批次样本已标记为断裂，通常不应继续添加测试记录。请谨慎操作。
+</div>
+{% endif %}
+
+<div class="card" style="max-width: 800px;">
+    <form method="post" novalidate>
+        {% csrf_token %}
+
+        <div class="two-col">
+            <div>
+                <div class="card-title" style="font-size: 0.95rem; border-bottom: none; padding-bottom: 0; margin-bottom: 0.5rem;">
+                    基本测试参数 <span style="color: #dc2626;">*</span>
+                </div>
+
+                {% with field=form.tension_force %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}<span class="required">*</span>
+                    </label>
+                    <input type="number" step="0.01"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% with field=form.elongation %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}<span class="required">*</span>
+                    </label>
+                    <input type="number" step="0.01" min="0"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% with field=form.test_time %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}
+                    </label>
+                    <input type="datetime-local"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|date:'Y-m-d\TH:i'|default:'' }}">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+            </div>
+
+            <div>
+                <div class="card-title" style="font-size: 0.95rem; border-bottom: none; padding-bottom: 0; margin-bottom: 0.5rem;">
+                    回弹率计算参数（可选，自动计算回弹率）
+                </div>
+
+                {% with field=form.length_before_rebound %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    <input type="number" step="0.01"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}">
+                    {% if field.help_text %}
+                        <div style="color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% with field=form.length_after_rebound %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    <input type="number" step="0.01"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}">
+                    {% if field.help_text %}
+                        <div style="color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% if object.pk and object.rebound_rate is not None %}
+                <div style="padding: 0.75rem; background: #f0f9ff; border-radius: 8px; color: #075985;">
+                    <strong>当前回弹率：</strong>{{ object.rebound_rate }}%
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card-title" style="font-size: 0.95rem; border-bottom: none; padding-bottom: 0; margin-top: 1rem; margin-bottom: 0.5rem;">
+            断裂状态
+        </div>
+
+        <div style="display: flex; gap: 1.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div class="checkbox-group">
+                <input type="checkbox" name="is_broken" id="id_is_broken"
+                       {% if form.is_broken.value %}checked{% endif %}
+                       onchange="toggleBreakFields()">
+                <label for="id_is_broken" style="font-weight: 500;">样本已断裂</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" name="abnormal_break" id="id_abnormal_break"
+                       {% if form.abnormal_break.value %}checked{% endif %}
+                       onchange="toggleBreakFields()">
+                <label for="id_abnormal_break" style="font-weight: 500;">异常断裂</label>
+            </div>
+        </div>
+
+        <div id="break_reason_field" style="display: none;">
+            {% with field=form.break_reason %}
+            <div class="form-group">
+                <label for="{{ field.id_for_label }}">
+                    断裂原因<span id="break_reason_required" class="required" style="display: none;">*</span>
+                </label>
+                <textarea name="{{ field.name }}"
+                          id="{{ field.id_for_label }}"
+                          class="form-control {% if field.errors %}error{% endif %}"
+                          rows="2">{{ field.value|default:'' }}</textarea>
+                {% if field.errors %}
+                    {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                {% endif %}
+            </div>
+            {% endwith %}
+        </div>
+
+        {% with field=form.notes %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <textarea name="{{ field.name }}"
+                      id="{{ field.id_for_label }}"
+                      class="form-control {% if field.errors %}error{% endif %}"
+                      rows="2">{{ field.value|default:'' }}</textarea>
+            {% if field.errors %}
+                {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+            {% endif %}
+        </div>
+        {% endwith %}
+
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {% for error in form.non_field_errors %}
+                    {{ error }}
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                {% if object.pk %}保存修改{% else %}添加测试记录{% endif %}
+            </button>
+            <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+
+<script>
+function toggleBreakFields() {
+    const isBroken = document.getElementById('id_is_broken').checked;
+    const isAbnormal = document.getElementById('id_abnormal_break').checked;
+    const reasonField = document.getElementById('break_reason_field');
+    const reasonRequired = document.getElementById('break_reason_required');
+
+    if (isBroken || isAbnormal) {
+        reasonField.style.display = 'block';
+    } else {
+        reasonField.style.display = 'none';
+    }
+
+    if (isAbnormal) {
+        reasonRequired.style.display = 'inline';
+    } else {
+        reasonRequired.style.display = 'none';
+    }
+}
+document.addEventListener('DOMContentLoaded', toggleBreakFields);
+</script>
+{% endblock %}

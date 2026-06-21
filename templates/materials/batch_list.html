@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}材料批次列表 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>材料批次</h1>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <form class="search-bar" method="get">
+            <input type="text" name="q" placeholder="搜索批次编号或来源..." value="{{ search_query }}">
+            <button type="submit" class="btn btn-secondary btn-sm">搜索</button>
+            {% if search_query %}
+                <a href="{% url 'materials:batch_list' %}" class="btn btn-secondary btn-sm">清除</a>
+            {% endif %}
+        </form>
+        <a href="{% url 'materials:batch_create' %}" class="btn btn-primary">+ 新增批次</a>
+    </div>
+</div>
+
+<div class="card">
+    {% if batches %}
+        <table>
+            <thead>
+                <tr>
+                    <th>批次编号</th>
+                    <th>材料来源</th>
+                    <th>直径(mm)</th>
+                    <th>初始长度(mm)</th>
+                    <th>测试次数</th>
+                    <th>状态</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for batch in batches %}
+                <tr>
+                    <td>
+                        <a href="{% url 'materials:batch_detail' batch.pk %}" style="color: #2563eb; text-decoration: none; font-weight: 600;">
+                            {{ batch.batch_number }}
+                        </a>
+                    </td>
+                    <td>{{ batch.material_source }}</td>
+                    <td>{{ batch.diameter }}</td>
+                    <td>{{ batch.initial_length }}</td>
+                    <td>{{ batch.test_count }}</td>
+                    <td>
+                        {% if batch.is_broken %}
+                            <span class="badge badge-danger">已断裂</span>
+                        {% else %}
+                            <span class="badge badge-success">正常</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ batch.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        <div class="actions-row">
+                            <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary btn-sm">详情</a>
+                            <a href="{% url 'materials:batch_edit' batch.pk %}" class="btn btn-secondary btn-sm">编辑</a>
+                            <a href="{% url 'materials:batch_delete' batch.pk %}" class="btn btn-danger btn-sm">删除</a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="empty-state">
+            <p>{% if search_query %}未找到匹配的材料批次{% else %}暂无材料批次数据{% endif %}</p>
+            <a href="{% url 'materials:batch_create' %}" class="btn btn-primary" style="margin-top: 1rem;">
+                + 新增批次
+            </a>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

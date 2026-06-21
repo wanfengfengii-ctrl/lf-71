@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% block title %}首页 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>仪表盘</h1>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">材料批次总数</div>
+        <div class="stat-value">{{ total_batches }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">可用批次</div>
+        <div class="stat-value">{{ active_batches }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">已断裂批次</div>
+        <div class="stat-value">{{ broken_batches }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">测试记录总数</div>
+        <div class="stat-value">{{ total_tests }}</div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">最近材料批次</div>
+        {% if recent_batches %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>批次编号</th>
+                        <th>材料来源</th>
+                        <th>状态</th>
+                        <th>测试次数</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for batch in recent_batches %}
+                    <tr>
+                        <td>
+                            <a href="{% url 'materials:batch_detail' batch.pk %}" style="color: #2563eb; text-decoration: none;">
+                                {{ batch.batch_number }}
+                            </a>
+                        </td>
+                        <td>{{ batch.material_source }}</td>
+                        <td>
+                            {% if batch.is_broken %}
+                                <span class="badge badge-danger">已断裂</span>
+                            {% else %}
+                                <span class="badge badge-success">正常</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ batch.test_count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <p>暂无材料批次数据</p>
+                <a href="{% url 'materials:batch_create' %}" class="btn btn-primary" style="margin-top: 1rem;">
+                    创建第一个批次
+                </a>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-title">最近测试记录</div>
+        {% if recent_tests %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>批次</th>
+                        <th>拉力值</th>
+                        <th>伸长量</th>
+                        <th>回弹率</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for test in recent_tests %}
+                    <tr>
+                        <td>
+                            <a href="{% url 'materials:batch_detail' test.batch.pk %}" style="color: #2563eb; text-decoration: none;">
+                                {{ test.batch.batch_number }}
+                            </a>
+                        </td>
+                        <td>{{ test.tension_force }} N</td>
+                        <td>{{ test.elongation }} mm</td>
+                        <td>
+                            {% if test.rebound_rate is not None %}
+                                {{ test.rebound_rate }}%
+                            {% else %}
+                                <span style="color: #9ca3af;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if test.is_broken %}
+                                <span class="badge badge-danger">断裂</span>
+                            {% else %}
+                                <span class="badge badge-success">正常</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <p>暂无测试记录</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
