@@ -56,10 +56,12 @@
     </div>
 </div>
 
+{% if recommendations %}
 <div class="card">
     <div class="card-title">📊 推荐对比分析图</div>
     <div class="chart-container" id="compareChart"></div>
 </div>
+{% endif %}
 
 <div class="card">
     <div class="card-title">🎯 推荐材料列表</div>
@@ -165,6 +167,7 @@
     {% endif %}
 </div>
 
+{% if recommendations %}
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
     const chartData = {{ chart_data_json|safe }};
@@ -183,4 +186,5 @@
     });
     window.addEventListener('resize', () => chart.resize());
 </script>
+{% endif %}
 {% endblock %}

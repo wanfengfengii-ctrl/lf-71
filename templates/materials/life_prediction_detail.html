@@ -143,10 +143,10 @@
         <div style="margin-top:0.75rem;">
             <a href="{% url 'materials:batch_bow_matching' batch.pk %}" class="btn btn-sm btn-primary">查看完整匹配</a>
         </div>
+        <div class="chart-container" id="bowChart" style="height:240px;margin-top:1rem;"></div>
         {% else %}
         <div class="empty-state"><p>暂无匹配数据</p></div>
         {% endif %}
-        <div class="chart-container" id="bowChart" style="height:240px;margin-top:1rem;"></div>
     </div>
     <div class="card">
         <div class="card-title">🔀 相似材料推荐（TOP 5）</div>
@@ -273,6 +273,7 @@
         ]
     });
 
+    {% if bow_matchings %}
     const bowChartData = {{ bow_chart_json|safe }};
     const bowChart = echarts.init(document.getElementById('bowChart'));
     bowChart.setOption({
@@ -292,12 +293,13 @@
             label: { show: true, position: 'top' },
         }]
     });
+    {% endif %}
 
     window.addEventListener('resize', () => {
         factorChart.resize();
         radarChart.resize();
         historyChart.resize();
-        bowChart.resize();
+        {% if bow_matchings %}bowChart.resize();{% endif %}
     });
 </script>
 {% endblock %}

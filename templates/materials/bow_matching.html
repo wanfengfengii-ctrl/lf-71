@@ -56,10 +56,12 @@
     </div>
 </div>
 
+{% if matchings_detail %}
 <div class="card">
     <div class="card-title">📊 弓型匹配度排行</div>
     <div class="chart-container" id="matchChart"></div>
 </div>
+{% endif %}
 
 <div class="card">
     <div class="card-title">🎯 详细匹配结果</div>
@@ -125,6 +127,7 @@
     {% endif %}
 </div>
 
+{% if matchings_detail %}
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
     const chartData = {{ chart_data_json|safe }};
@@ -172,4 +175,5 @@
     });
     window.addEventListener('resize', () => chart.resize());
 </script>
+{% endif %}
 {% endblock %}
