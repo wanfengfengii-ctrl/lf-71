@@ -1,0 +1,469 @@
+{% extends 'base.html' %}
+{% block title %}统计分析 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>统计分析</h1>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">总批次</div>
+        <div class="stat-value">{{ stats.total_batches }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">拉伸测试</div>
+        <div class="stat-value">{{ stats.total_tension_tests }}</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #7c3aed;">
+        <div class="stat-label">疲劳测试</div>
+        <div class="stat-value">{{ stats.total_fatigue_tests }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">断裂批次</div>
+        <div class="stat-value">{{ stats.broken_count }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">异常断裂</div>
+        <div class="stat-value">{{ stats.abnormal_break_count }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">异常标记数据</div>
+        <div class="stat-value">{{ stats.flagged_tension_count|add:stats.flagged_fatigue_count }}</div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">测试数据趋势 (近30天)</div>
+        <div class="chart-container" style="height: 300px;">
+            <canvas id="trendChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">材料来源分布</div>
+        <div class="chart-container" style="height: 300px;">
+            <canvas id="sourceChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">快照趋势</div>
+    <div class="chart-container" style="height: 280px;">
+        <canvas id="snapshotChart" style="width: 100%; height: 100%;"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">拉伸测试统计</div>
+    <div class="two-col">
+        <div>
+            <h3 style="font-size: 0.95rem; color: #374151; margin-bottom: 0.75rem;">拉力统计</h3>
+            {% if tension_stats.force %}
+            <table>
+                <thead>
+                    <tr><th>指标</th><th>数值</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>最小值</td><td>{{ tension_stats.force.min }} N</td></tr>
+                    <tr><td>最大值</td><td>{{ tension_stats.force.max }} N</td></tr>
+                    <tr><td>平均值</td><td>{{ tension_stats.force.mean }} N</td></tr>
+                    <tr><td>中位数</td><td>{{ tension_stats.force.median }} N</td></tr>
+                    <tr><td>标准差</td><td>{{ tension_stats.force.std }} N</td></tr>
+                    <tr><td>方差</td><td>{{ tension_stats.force.variance }} N²</td></tr>
+                    <tr><td>极差</td><td>{{ tension_stats.force.range }} N</td></tr>
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state" style="padding: 1.5rem;"><p>暂无数据</p></div>
+            {% endif %}
+        </div>
+        <div>
+            <h3 style="font-size: 0.95rem; color: #374151; margin-bottom: 0.75rem;">伸长量统计</h3>
+            {% if tension_stats.elongation %}
+            <table>
+                <thead>
+                    <tr><th>指标</th><th>数值</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>最小值</td><td>{{ tension_stats.elongation.min }} mm</td></tr>
+                    <tr><td>最大值</td><td>{{ tension_stats.elongation.max }} mm</td></tr>
+                    <tr><td>平均值</td><td>{{ tension_stats.elongation.mean }} mm</td></tr>
+                    <tr><td>中位数</td><td>{{ tension_stats.elongation.median }} mm</td></tr>
+                    <tr><td>标准差</td><td>{{ tension_stats.elongation.std }} mm</td></tr>
+                    <tr><td>方差</td><td>{{ tension_stats.elongation.variance }} mm²</td></tr>
+                    <tr><td>极差</td><td>{{ tension_stats.elongation.range }} mm</td></tr>
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state" style="padding: 1.5rem;"><p>暂无数据</p></div>
+            {% endif %}
+        </div>
+    </div>
+    <div style="margin-top: 1.5rem;">
+        <h3 style="font-size: 0.95rem; color: #374151; margin-bottom: 0.75rem;">回弹率统计</h3>
+        {% if tension_stats.rebound %}
+        <table>
+            <thead>
+                <tr><th>指标</th><th>数值</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>最小值</td><td>{{ tension_stats.rebound.min }}%</td></tr>
+                <tr><td>最大值</td><td>{{ tension_stats.rebound.max }}%</td></tr>
+                <tr><td>平均值</td><td>{{ tension_stats.rebound.mean }}%</td></tr>
+                <tr><td>中位数</td><td>{{ tension_stats.rebound.median }}%</td></tr>
+                <tr><td>标准差</td><td>{{ tension_stats.rebound.std }}%</td></tr>
+                <tr><td>方差</td><td>{{ tension_stats.rebound.variance }}%</td></tr>
+                <tr><td>极差</td><td>{{ tension_stats.rebound.range }}%</td></tr>
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state" style="padding: 1.5rem;"><p>暂无数据</p></div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">疲劳测试统计</div>
+    <div class="two-col">
+        <div>
+            <h3 style="font-size: 0.95rem; color: #374151; margin-bottom: 0.75rem;">循环次数统计</h3>
+            {% if fatigue_stats.cycles %}
+            <table>
+                <thead>
+                    <tr><th>指标</th><th>数值</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>最小值</td><td>{{ fatigue_stats.cycles.min }}</td></tr>
+                    <tr><td>最大值</td><td>{{ fatigue_stats.cycles.max }}</td></tr>
+                    <tr><td>平均值</td><td>{{ fatigue_stats.cycles.mean }}</td></tr>
+                    <tr><td>中位数</td><td>{{ fatigue_stats.cycles.median }}</td></tr>
+                    <tr><td>标准差</td><td>{{ fatigue_stats.cycles.std }}</td></tr>
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state" style="padding: 1.5rem;"><p>暂无数据</p></div>
+            {% endif %}
+        </div>
+        <div>
+            <h3 style="font-size: 0.95rem; color: #374151; margin-bottom: 0.75rem;">载荷力统计</h3>
+            {% if fatigue_stats.load %}
+            <table>
+                <thead>
+                    <tr><th>指标</th><th>数值</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>最小值</td><td>{{ fatigue_stats.load.min }} N</td></tr>
+                    <tr><td>最大值</td><td>{{ fatigue_stats.load.max }} N</td></tr>
+                    <tr><td>平均值</td><td>{{ fatigue_stats.load.mean }} N</td></tr>
+                    <tr><td>中位数</td><td>{{ fatigue_stats.load.median }} N</td></tr>
+                    <tr><td>标准差</td><td>{{ fatigue_stats.load.std }} N</td></tr>
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state" style="padding: 1.5rem;"><p>暂无数据</p></div>
+            {% endif %}
+        </div>
+    </div>
+    {% if fatigue_stats.result_distribution %}
+    <div style="margin-top: 1.5rem;">
+        <h3 style="font-size: 0.95rem; color: #374151; margin-bottom: 0.75rem;">结果分布</h3>
+        <div id="result-distribution" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;"></div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-title">批次性能对比</div>
+    <table id="batch-comparison-table">
+        <thead>
+            <tr>
+                <th>批次编号</th>
+                <th>材料来源</th>
+                <th>直径(mm)</th>
+                <th>初始长度(mm)</th>
+                <th>测试次数</th>
+                <th>杨氏模量(GPa)</th>
+                <th>拉伸强度(MPa)</th>
+                <th>断裂伸长率(%)</th>
+                <th>最大拉力(N)</th>
+                <th>平均回弹率(%)</th>
+                <th>状态</th>
+            </tr>
+        </thead>
+        <tbody id="batch-comparison-body"></tbody>
+    </table>
+    <div id="batch-comparison-empty" class="empty-state" style="display: none;">
+        <p>暂无批次对比数据</p>
+    </div>
+</div>
+
+<script>
+(function() {
+    var resultDist = {{ fatigue_stats.result_distribution|safe }};
+    var distContainer = document.getElementById('result-distribution');
+    if (distContainer && resultDist) {
+        var colorMap = {
+            intact: '#16a34a',
+            minor_damage: '#f59e0b',
+            major_damage: '#f97316',
+            broken: '#dc2626'
+        };
+        var totalCount = 0;
+        var keys = Object.keys(resultDist);
+        for (var i = 0; i < keys.length; i++) {
+            totalCount += resultDist[keys[i]].count;
+        }
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            var item = resultDist[key];
+            var pct = totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(1) : 0;
+            var div = document.createElement('div');
+            div.style.cssText = 'padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px;';
+            div.innerHTML =
+                '<div style="font-weight:600;color:#1f2937;margin-bottom:0.5rem;">' + item.label + '</div>' +
+                '<div style="font-size:1.5rem;font-weight:700;color:' + colorMap[key] + ';">' + item.count + '</div>' +
+                '<div style="margin-top:0.5rem;background:#f3f4f6;border-radius:4px;height:6px;overflow:hidden;">' +
+                '<div style="height:100%;width:' + pct + '%;background:' + colorMap[key] + ';border-radius:4px;"></div>' +
+                '</div>' +
+                '<div style="font-size:0.8rem;color:#6b7280;margin-top:0.25rem;">' + pct + '%</div>';
+            distContainer.appendChild(div);
+        }
+    }
+
+    var batchData = {{ batch_comparison_data_json|safe }};
+    var tbody = document.getElementById('batch-comparison-body');
+    var emptyEl = document.getElementById('batch-comparison-empty');
+    var tableEl = document.getElementById('batch-comparison-table');
+
+    if (batchData && batchData.length > 0) {
+        for (var i = 0; i < batchData.length; i++) {
+            var row = batchData[i];
+            var tr = document.createElement('tr');
+            var statusBadge = row.is_broken
+                ? '<span class="badge badge-danger">已断裂</span>'
+                : '<span class="badge badge-success">正常</span>';
+            tr.innerHTML =
+                '<td style="font-weight:600;">' + row.label + '</td>' +
+                '<td>' + row.source + '</td>' +
+                '<td>' + row.diameter + '</td>' +
+                '<td>' + row.initial_length + '</td>' +
+                '<td>' + row.test_count + '</td>' +
+                '<td>' + (row.youngs_modulus ? row.youngs_modulus.toFixed(2) : '-') + '</td>' +
+                '<td>' + (row.tensile_strength ? row.tensile_strength.toFixed(2) : '-') + '</td>' +
+                '<td>' + (row.elongation_at_break ? row.elongation_at_break.toFixed(2) : '-') + '</td>' +
+                '<td>' + row.max_force + '</td>' +
+                '<td>' + (row.avg_rebound ? row.avg_rebound.toFixed(2) : '-') + '</td>' +
+                '<td>' + statusBadge + '</td>';
+            tbody.appendChild(tr);
+        }
+    } else {
+        tableEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+    }
+})();
+</script>
+
+<script>
+(function() {
+    const trendData = {{ trend_data_json|safe }};
+    const canvas = document.getElementById('trendChart');
+    if (!canvas || !trendData || trendData.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 30, right: 60, bottom: 50, left: 50 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
+        ctx.clearRect(0, 0, w, h);
+
+        const maxTension = Math.max(...trendData.map(d => d.tension_tests || 0), 1);
+        const maxFatigue = Math.max(...trendData.map(d => d.fatigue_tests || 0), 1);
+        const maxY = Math.max(maxTension, maxFatigue) * 1.2;
+
+        function toX(i) { return padding.left + (i / (trendData.length - 1 || 1)) * plotW; }
+        function toY(v) { return padding.top + plotH - (v / maxY) * plotH; }
+
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const yVal = (maxY * i / 5), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(yVal.toFixed(0), padding.left - 5, y);
+        }
+
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
+
+        ctx.fillStyle = '#374151'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('日期', padding.left + plotW / 2, h - 4);
+
+        ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 2; ctx.beginPath();
+        trendData.forEach((d, i) => { const x = toX(i), y = toY(d.tension_tests || 0); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+        ctx.stroke();
+
+        ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 2; ctx.beginPath();
+        trendData.forEach((d, i) => { const x = toX(i), y = toY(d.fatigue_tests || 0); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+        ctx.stroke();
+
+        trendData.forEach((d, i) => {
+            const x = toX(i);
+            ctx.beginPath(); ctx.arc(x, toY(d.tension_tests || 0), 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#2563eb'; ctx.fill();
+            ctx.beginPath(); ctx.arc(x, toY(d.fatigue_tests || 0), 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#7c3aed'; ctx.fill();
+        });
+
+        if (trendData.length > 0) {
+            const step = Math.ceil(trendData.length / 6);
+            trendData.forEach((d, i) => {
+                if (i % step === 0) {
+                    ctx.fillStyle = '#6b7280'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+                    ctx.fillText(d.date ? d.date.slice(5) : '', toX(i), padding.top + plotH + 10);
+                }
+            });
+        }
+
+        ctx.fillStyle = '#374151'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillStyle = '#2563eb'; ctx.fillRect(padding.left + plotW - 10, padding.top + 5, 12, 12);
+        ctx.fillStyle = '#374151'; ctx.fillText('拉伸测试', padding.left + plotW - 15, padding.top + 5);
+        ctx.fillStyle = '#7c3aed'; ctx.fillRect(padding.left + plotW - 10, padding.top + 22, 12, 12);
+        ctx.fillStyle = '#374151'; ctx.fillText('疲劳测试', padding.left + plotW - 15, padding.top + 22);
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+
+<script>
+(function() {
+    const sourceData = {{ source_distribution_json|safe }};
+    const canvas = document.getElementById('sourceChart');
+    if (!canvas || !sourceData || sourceData.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const total = sourceData.reduce((s, d) => s + (d.count || 0), 0);
+        if (total === 0 || w < 100 || h < 100) return;
+
+        const cx = w / 2, cy = h / 2;
+        const radius = Math.max(10, Math.min(w, h) / 2 - 60);
+        const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#ea580c', '#4f46e5'];
+
+        let startAngle = -Math.PI / 2;
+        sourceData.forEach((d, i) => {
+            const slice = (d.count / total) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, radius, startAngle, startAngle + slice);
+            ctx.closePath();
+            ctx.fillStyle = colors[i % colors.length];
+            ctx.fill();
+            startAngle += slice;
+        });
+
+        ctx.beginPath(); ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff'; ctx.fill();
+
+        ctx.fillStyle = '#374151'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('总计: ' + total, cx, cy);
+
+        let legendY = 10;
+        sourceData.forEach((d, i) => {
+            const pct = ((d.count / total) * 100).toFixed(1);
+            ctx.fillStyle = colors[i % colors.length];
+            ctx.fillRect(w - 120, legendY, 12, 12);
+            ctx.fillStyle = '#374151'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText((d.source || '未知') + ' ' + pct + '%', w - 103, legendY + 1);
+            legendY += 18;
+        });
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+
+<script>
+(function() {
+    const snapData = {{ snapshot_data_json|safe }};
+    const canvas = document.getElementById('snapshotChart');
+    if (!canvas || !snapData || snapData.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 30, right: 80, bottom: 50, left: 50 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
+        ctx.clearRect(0, 0, w, h);
+
+        const maxBatches = Math.max(...snapData.map(d => Math.max(d.total_batches || 0, d.active_batches || 0, d.broken_batches || 0)), 1);
+        const maxForce = Math.max(...snapData.map(d => d.avg_force || 0), 1);
+        const maxY = Math.max(maxBatches, maxForce * 0.1) * 1.2;
+
+        function toX(i) { return padding.left + (i / (snapData.length - 1 || 1)) * plotW; }
+        function toY(v) { return padding.top + plotH - (v / maxY) * plotH; }
+
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const yVal = (maxY * i / 5), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(yVal.toFixed(0), padding.left - 5, y);
+        }
+
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
+
+        ctx.fillStyle = '#374151'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('日期', padding.left + plotW / 2, h - 4);
+
+        const series = [
+            { key: 'total_batches', color: '#2563eb', label: '总批次' },
+            { key: 'active_batches', color: '#16a34a', label: '可用批次' },
+            { key: 'broken_batches', color: '#dc2626', label: '断裂批次' },
+        ];
+        series.forEach(s => {
+            ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath();
+            snapData.forEach((d, i) => { const x = toX(i), y = toY(d[s.key] || 0); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+            ctx.stroke();
+        });
+
+        if (snapData.length > 0) {
+            const step = Math.ceil(snapData.length / 8);
+            snapData.forEach((d, i) => {
+                if (i % step === 0) {
+                    ctx.fillStyle = '#6b7280'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+                    ctx.fillText(d.date ? d.date.slice(5) : '', toX(i), padding.top + plotH + 10);
+                }
+            });
+        }
+
+        ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+        series.forEach((s, i) => {
+            ctx.fillStyle = s.color; ctx.fillRect(padding.left + plotW - 10, padding.top + 5 + i * 18, 12, 12);
+            ctx.fillStyle = '#374151'; ctx.fillText(s.label, padding.left + plotW - 15, padding.top + 5 + i * 18);
+        });
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+{% endblock %}

@@ -19,6 +19,27 @@
 </div>
 {% endif %}
 
+{% if reference_stats %}
+<div class="card" style="max-width: 800px; padding: 1rem; margin-bottom: 1rem;">
+    <div style="font-size: 0.9rem; font-weight: 600; color: #1e3a5f; margin-bottom: 0.75rem;">
+        📊 批次参考统计 (基于 {{ reference_stats.test_count }} 条正常测试记录)
+    </div>
+    <div class="detail-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+        <div class="detail-item" style="padding: 0.3rem 0;">
+            <div class="label">拉力范围</div>
+            <div class="value">{{ reference_stats.min_force }} ~ {{ reference_stats.max_force }} N (均值 {{ reference_stats.avg_force }} N)</div>
+        </div>
+        <div class="detail-item" style="padding: 0.3rem 0;">
+            <div class="label">伸长量范围</div>
+            <div class="value">{{ reference_stats.min_elongation }} ~ {{ reference_stats.max_elongation }} mm (均值 {{ reference_stats.avg_elongation }} mm)</div>
+        </div>
+    </div>
+    <div style="font-size: 0.8rem; color: #6b7280; margin-top: 0.5rem;">
+        💡 提示：若输入值与参考值偏差较大，系统会自动进行异常检测提醒
+    </div>
+</div>
+{% endif %}
+
 <div class="card" style="max-width: 800px;">
     <form method="post" novalidate>
         {% csrf_token %}
@@ -46,7 +67,8 @@
                            name="{{ field.name }}"
                            id="{{ field.id_for_label }}"
                            class="form-control {% if field.errors %}error{% endif %}"
-                           value="{{ field.value|default:'' }}">
+                           value="{{ field.value|default:'' }}"
+                           oninput="updateStressStrain()">
                     {% if field.errors %}
                         {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
                     {% endif %}
@@ -62,7 +84,8 @@
                            name="{{ field.name }}"
                            id="{{ field.id_for_label }}"
                            class="form-control {% if field.errors %}error{% endif %}"
-                           value="{{ field.value|default:'' }}">
+                           value="{{ field.value|default:'' }}"
+                           oninput="updateStressStrain()">
                     {% if field.errors %}
                         {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
                     {% endif %}
@@ -84,6 +107,14 @@
                     {% endif %}
                 </div>
                 {% endwith %}
+
+                <div id="stress-strain-preview" style="display:none; padding: 0.75rem; background: #f0fdf4; border-radius: 8px; margin-bottom: 1rem;">
+                    <div style="font-size: 0.85rem; color: #166534; font-weight: 600;">实时计算</div>
+                    <div style="display: flex; gap: 1rem; margin-top: 0.35rem; font-size: 0.85rem;">
+                        <div style="color: #15803d;">应力(σ): <span id="preview-stress">-</span> MPa</div>
+                        <div style="color: #15803d;">应变(ε): <span id="preview-strain">-</span></div>
+                    </div>
+                </div>
             </div>
 
             <div>
@@ -98,7 +129,8 @@
                            name="{{ field.name }}"
                            id="{{ field.id_for_label }}"
                            class="form-control {% if field.errors %}error{% endif %}"
-                           value="{{ field.value|default:'' }}">
+                           value="{{ field.value|default:'' }}"
+                           oninput="calculateRebound()">
                     {% if field.help_text %}
                         <div style="color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;">{{ field.help_text }}</div>
                     {% endif %}
@@ -115,7 +147,8 @@
                            name="{{ field.name }}"
                            id="{{ field.id_for_label }}"
                            class="form-control {% if field.errors %}error{% endif %}"
-                           value="{{ field.value|default:'' }}">
+                           value="{{ field.value|default:'' }}"
+                           oninput="calculateRebound()">
                     {% if field.help_text %}
                         <div style="color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;">{{ field.help_text }}</div>
                     {% endif %}
@@ -125,8 +158,16 @@
                 </div>
                 {% endwith %}
 
+                <div id="rebound-preview" style="display:none; padding: 0.75rem; background: #eff6ff; border-radius: 8px;">
+                    <div style="font-size: 0.85rem; color: #1e40af; font-weight: 600;">预估回弹率</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: #1d4ed8; margin-top: 0.25rem;">
+                        <span id="preview-rebound">-</span>%
+                    </div>
+                    <div id="rebound-message" style="font-size: 0.8rem; margin-top: 0.25rem;"></div>
+                </div>
+
                 {% if object.pk and object.rebound_rate is not None %}
-                <div style="padding: 0.75rem; background: #f0f9ff; border-radius: 8px; color: #075985;">
+                <div style="padding: 0.75rem; background: #f0f9ff; border-radius: 8px; color: #075985; margin-top: 0.5rem;">
                     <strong>当前回弹率：</strong>{{ object.rebound_rate }}%
                 </div>
                 {% endif %}
@@ -157,6 +198,42 @@
             <div class="form-group">
                 <label for="{{ field.id_for_label }}">
                     断裂原因<span id="break_reason_required" class="required" style="display: none;">*</span>
+                </label>
+                <textarea name="{{ field.name }}"
+                          id="{{ field.id_for_label }}"
+                          class="form-control {% if field.errors %}error{% endif %}"
+                          rows="2">{{ field.value|default:'' }}</textarea>
+                {% if field.errors %}
+                    {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                {% endif %}
+            </div>
+            {% endwith %}
+        </div>
+
+        {% if object.pk and object.flag_reason %}
+        <div style="padding: 0.75rem; background: #fef2f2; border-radius: 8px; color: #991b1b; margin-bottom: 1rem;">
+            <strong>异常标记原因：</strong>{{ object.flag_reason }}
+        </div>
+        {% endif %}
+
+        <div class="card-title" style="font-size: 0.95rem; border-bottom: none; padding-bottom: 0; margin-top: 1rem; margin-bottom: 0.5rem;">
+            数据标记
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <div class="checkbox-group">
+                <input type="checkbox" name="is_flagged" id="id_is_flagged"
+                       {% if form.is_flagged.value %}checked{% endif %}
+                       onchange="toggleFlagReason()">
+                <label for="id_is_flagged" style="font-weight: 500;">标记为异常数据</label>
+            </div>
+        </div>
+
+        <div id="flag_reason_field" style="display: none;">
+            {% with field=form.flag_reason %}
+            <div class="form-group">
+                <label for="{{ field.id_for_label }}">
+                    标记原因
                 </label>
                 <textarea name="{{ field.name }}"
                           id="{{ field.id_for_label }}"
@@ -200,6 +277,78 @@
 </div>
 
 <script>
+const batchDiameter = {{ batch.diameter }};
+const batchInitialLength = {{ batch.initial_length }};
+const crossSectionalArea = Math.PI * Math.pow(batchDiameter / 2, 2);
+
+function updateStressStrain() {
+    const force = parseFloat(document.getElementById('id_tension_force').value) || 0;
+    const elongation = parseFloat(document.getElementById('id_elongation').value) || 0;
+    const preview = document.getElementById('stress-strain-preview');
+
+    if (force > 0 && elongation > 0 && crossSectionalArea > 0 && batchInitialLength > 0) {
+        const stress = (force / crossSectionalArea);
+        const strain = elongation / batchInitialLength;
+        document.getElementById('preview-stress').textContent = stress.toFixed(2);
+        document.getElementById('preview-strain').textContent = strain.toFixed(6);
+        preview.style.display = 'block';
+    } else {
+        preview.style.display = 'none';
+    }
+}
+
+function calculateRebound() {
+    const before = parseFloat(document.getElementById('id_length_before_rebound').value) || 0;
+    const after = parseFloat(document.getElementById('id_length_after_rebound').value) || 0;
+    const preview = document.getElementById('rebound-preview');
+    const msg = document.getElementById('rebound-message');
+
+    if (before > 0 && after > 0 && batchInitialLength > 0) {
+        if (before <= batchInitialLength) {
+            msg.textContent = '⚠️ 回弹前长度应大于初始长度';
+            msg.style.color = '#dc2626';
+            document.getElementById('preview-rebound').textContent = '-';
+            preview.style.display = 'block';
+            return;
+        }
+        if (after < batchInitialLength) {
+            msg.textContent = '⚠️ 回弹后长度不应小于初始长度';
+            msg.style.color = '#dc2626';
+            document.getElementById('preview-rebound').textContent = '-';
+            preview.style.display = 'block';
+            return;
+        }
+        if (after > before) {
+            msg.textContent = '⚠️ 回弹后长度不应大于回弹前长度';
+            msg.style.color = '#dc2626';
+            document.getElementById('preview-rebound').textContent = '-';
+            preview.style.display = 'block';
+            return;
+        }
+        const elongation = before - batchInitialLength;
+        const residual = after - batchInitialLength;
+        const rebound = elongation > 0 ? ((elongation - residual) / elongation) * 100 : 0;
+
+        document.getElementById('preview-rebound').textContent = rebound.toFixed(2);
+        if (rebound >= 90) {
+            msg.textContent = '✓ 回弹性能优秀';
+            msg.style.color = '#166534';
+        } else if (rebound >= 70) {
+            msg.textContent = '✓ 回弹性能良好';
+            msg.style.color = '#15803d';
+        } else if (rebound >= 50) {
+            msg.textContent = '回弹性能一般';
+            msg.style.color = '#92400e';
+        } else {
+            msg.textContent = '⚠️ 回弹性能较差';
+            msg.style.color = '#991b1b';
+        }
+        preview.style.display = 'block';
+    } else {
+        preview.style.display = 'none';
+    }
+}
+
 function toggleBreakFields() {
     const isBroken = document.getElementById('id_is_broken').checked;
     const isAbnormal = document.getElementById('id_abnormal_break').checked;
@@ -218,6 +367,23 @@ function toggleBreakFields() {
         reasonRequired.style.display = 'none';
     }
 }
-document.addEventListener('DOMContentLoaded', toggleBreakFields);
+
+function toggleFlagReason() {
+    const isFlagged = document.getElementById('id_is_flagged').checked;
+    const flagReasonField = document.getElementById('flag_reason_field');
+
+    if (isFlagged) {
+        flagReasonField.style.display = 'block';
+    } else {
+        flagReasonField.style.display = 'none';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    toggleBreakFields();
+    toggleFlagReason();
+    updateStressStrain();
+    calculateRebound();
+});
 </script>
 {% endblock %}

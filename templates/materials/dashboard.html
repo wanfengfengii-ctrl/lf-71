@@ -22,6 +22,74 @@
         <div class="stat-label">测试记录总数</div>
         <div class="stat-value">{{ total_tests }}</div>
     </div>
+    <div class="stat-card">
+        <div class="stat-label">拉伸测试</div>
+        <div class="stat-value">{{ total_tension_tests }}</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #7c3aed;">
+        <div class="stat-label">疲劳测试</div>
+        <div class="stat-value">{{ total_fatigue_tests }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label"><a href="{% url 'materials:anomaly_list' %}" style="color: inherit; text-decoration: none;">未处理异常</a></div>
+        <div class="stat-value"><a href="{% url 'materials:anomaly_list' %}" style="color: inherit; text-decoration: none;">{{ unresolved_anomalies }}</a></div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">批次状态分布</div>
+        <div id="status-distribution" style="display: flex; flex-direction: column; gap: 1rem;"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">待处理事项</div>
+        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: #fef3c7; border-radius: 8px;">
+                <div>
+                    <div style="font-weight: 500; color: #92400e;">待审核批次</div>
+                    <div style="font-size: 0.85rem; color: #b45309;">需要审核断裂情况的批次</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 1.5rem; font-weight: 700; color: #92400e;">{{ review_batches }}</span>
+                    <a href="{% url 'materials:batch_list' %}?status=review" class="btn btn-sm btn-secondary">查看</a>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: #fee2e2; border-radius: 8px;">
+                <div>
+                    <div style="font-weight: 500; color: #991b1b;">未处理异常</div>
+                    <div style="font-size: 0.85rem; color: #b91c1c;">需要处理的异常数据</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 1.5rem; font-weight: 700; color: #991b1b;">{{ unresolved_anomalies }}</span>
+                    <a href="{% url 'materials:anomaly_list' %}" class="btn btn-sm btn-secondary">查看</a>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: #fef3c7; border-radius: 8px;">
+                <div>
+                    <div style="font-weight: 500; color: #92400e;">异常标记数据</div>
+                    <div style="font-size: 0.85rem; color: #b45309;">被标记为异常的测试记录</div>
+                </div>
+                <span style="font-size: 1.5rem; font-weight: 700; color: #92400e;">{{ flagged_data_count }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">材料来源分布</div>
+        <div class="chart-container" style="height: 260px;">
+            <canvas id="sourceDistChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">测试数据趋势</div>
+        <div class="chart-container" style="height: 260px;">
+            <canvas id="trendDistChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
 </div>
 
 <div class="two-col">
@@ -40,17 +108,19 @@
                 <tbody>
                     {% for batch in recent_batches %}
                     <tr>
-                        <td>
-                            <a href="{% url 'materials:batch_detail' batch.pk %}" style="color: #2563eb; text-decoration: none;">
-                                {{ batch.batch_number }}
-                            </a>
-                        </td>
+                        <td><a href="{% url 'materials:batch_detail' batch.pk %}" style="color: #2563eb; text-decoration: none;">{{ batch.batch_number }}</a></td>
                         <td>{{ batch.material_source }}</td>
                         <td>
-                            {% if batch.is_broken %}
-                                <span class="badge badge-danger">已断裂</span>
-                            {% else %}
+                            {% if batch.status == 'active' %}
                                 <span class="badge badge-success">正常</span>
+                            {% elif batch.status == 'testing' %}
+                                <span class="badge badge-info">测试中</span>
+                            {% elif batch.status == 'broken' %}
+                                <span class="badge badge-danger">已断裂</span>
+                            {% elif batch.status == 'review' %}
+                                <span class="badge badge-warning">待审核</span>
+                            {% elif batch.status == 'archived' %}
+                                <span class="badge badge-gray">已归档</span>
                             {% endif %}
                         </td>
                         <td>{{ batch.test_count }}</td>
@@ -61,9 +131,7 @@
         {% else %}
             <div class="empty-state">
                 <p>暂无材料批次数据</p>
-                <a href="{% url 'materials:batch_create' %}" class="btn btn-primary" style="margin-top: 1rem;">
-                    创建第一个批次
-                </a>
+                <a href="{% url 'materials:batch_create' %}" class="btn btn-primary" style="margin-top: 1rem;">创建第一个批次</a>
             </div>
         {% endif %}
     </div>
@@ -84,11 +152,7 @@
                 <tbody>
                     {% for test in recent_tests %}
                     <tr>
-                        <td>
-                            <a href="{% url 'materials:batch_detail' test.batch.pk %}" style="color: #2563eb; text-decoration: none;">
-                                {{ test.batch.batch_number }}
-                            </a>
-                        </td>
+                        <td><a href="{% url 'materials:batch_detail' test.batch.pk %}" style="color: #2563eb; text-decoration: none;">{{ test.batch.batch_number }}</a></td>
                         <td>{{ test.tension_force }} N</td>
                         <td>{{ test.elongation }} mm</td>
                         <td>
@@ -101,6 +165,8 @@
                         <td>
                             {% if test.is_broken %}
                                 <span class="badge badge-danger">断裂</span>
+                            {% elif test.is_flagged %}
+                                <span class="badge badge-warning">异常</span>
                             {% else %}
                                 <span class="badge badge-success">正常</span>
                             {% endif %}
@@ -116,4 +182,196 @@
         {% endif %}
     </div>
 </div>
+
+{% if recent_flow_records %}
+<div class="card">
+    <div class="card-title">最近流程记录</div>
+    <table>
+        <thead>
+            <tr>
+                <th>时间</th>
+                <th>批次</th>
+                <th>操作类型</th>
+                <th>操作人</th>
+                <th>备注</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for record in recent_flow_records %}
+            <tr>
+                <td>{{ record.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    <a href="{% url 'materials:batch_detail' record.batch.pk %}" style="color: #2563eb; text-decoration: none;">
+                        {{ record.batch.batch_number }}
+                    </a>
+                </td>
+                <td>
+                    {% if record.action == 'detected' %}
+                        <span class="badge badge-danger">检测到断裂</span>
+                    {% elif record.action == 'review_start' %}
+                        <span class="badge badge-warning">开始审核</span>
+                    {% elif record.action == 'archived' %}
+                        <span class="badge badge-gray">已归档</span>
+                    {% elif record.action == 'reactivated' %}
+                        <span class="badge badge-success">恢复正常</span>
+                    {% elif record.action == 'note_added' %}
+                        <span class="badge badge-info">备注添加</span>
+                    {% else %}
+                        {{ record.get_action_display }}
+                    {% endif %}
+                </td>
+                <td>{{ record.operator|default:"系统" }}</td>
+                <td>{{ record.notes|default:"-"|truncatechars:40 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<script>
+(function() {
+    var data = {{ status_distribution_json|safe }};
+    var colors = {
+        active: '#16a34a',
+        testing: '#2563eb',
+        broken: '#dc2626',
+        review: '#f59e0b',
+        archived: '#6b7280'
+    };
+    var container = document.getElementById('status-distribution');
+    var total = 0;
+    for (var key in data) {
+        total += data[key].count;
+    }
+    for (var key in data) {
+        var item = data[key];
+        var pct = total > 0 ? Math.round((item.count / total) * 100) : 0;
+        var row = document.createElement('div');
+        row.innerHTML =
+            '<div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">' +
+                '<span style="font-size: 0.9rem; color: #374151;">' + item.label + '</span>' +
+                '<span style="font-size: 0.9rem; font-weight: 600; color: #374151;">' + item.count + ' (' + pct + '%)</span>' +
+            '</div>' +
+            '<div style="width: 100%; height: 10px; background: #f3f4f6; border-radius: 5px; overflow: hidden;">' +
+                '<div style="width: ' + pct + '%; height: 100%; background: ' + colors[key] + '; border-radius: 5px; transition: width 0.5s;"></div>' +
+            '</div>';
+        container.appendChild(row);
+    }
+})();
+</script>
+
+<script>
+(function() {
+    const sourceData = {{ source_distribution_json|safe }};
+    const canvas = document.getElementById('sourceDistChart');
+    if (!canvas || !sourceData || sourceData.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        const total = sourceData.reduce((s, d) => s + (d.count || 0), 0);
+        if (total === 0 || w < 100 || h < 100) return;
+        const cx = w / 2 - 20, cy = h / 2;
+        const radius = Math.max(10, Math.min(w / 2 - 80, h / 2 - 20));
+        const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#ea580c', '#4f46e5'];
+
+        let startAngle = -Math.PI / 2;
+        sourceData.forEach((d, i) => {
+            const slice = (d.count / total) * Math.PI * 2;
+            ctx.beginPath(); ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, radius, startAngle, startAngle + slice);
+            ctx.closePath(); ctx.fillStyle = colors[i % colors.length]; ctx.fill();
+            startAngle += slice;
+        });
+
+        ctx.beginPath(); ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.fillStyle = '#374151'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('总计: ' + total, cx, cy);
+
+        let legendY = 10;
+        sourceData.forEach((d, i) => {
+            const pct = ((d.count / total) * 100).toFixed(1);
+            ctx.fillStyle = colors[i % colors.length];
+            ctx.fillRect(w - 110, legendY, 10, 10);
+            ctx.fillStyle = '#374151'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText((d.source || '未知') + ' ' + pct + '%', w - 96, legendY + 9);
+            legendY += 16;
+        });
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+
+<script>
+(function() {
+    const trendData = {{ trend_data_json|safe }};
+    const canvas = document.getElementById('trendDistChart');
+    if (!canvas || !trendData || trendData.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 20, right: 20, bottom: 35, left: 40 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
+        ctx.clearRect(0, 0, w, h);
+
+        const maxTension = Math.max(...trendData.map(d => d.tension_tests || 0), 1);
+        const maxFatigue = Math.max(...trendData.map(d => d.fatigue_tests || 0), 1);
+        const maxY = Math.max(maxTension, maxFatigue) * 1.2;
+
+        function toX(i) { return padding.left + (i / (trendData.length - 1 || 1)) * plotW; }
+        function toY(v) { return padding.top + plotH - (v / maxY) * plotH; }
+
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const yVal = (maxY * i / 4), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(yVal.toFixed(0), padding.left - 3, y);
+        }
+
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
+
+        ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 2; ctx.beginPath();
+        trendData.forEach((d, i) => { const x = toX(i), y = toY(d.tension_tests || 0); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+        ctx.stroke();
+
+        ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 2; ctx.beginPath();
+        trendData.forEach((d, i) => { const x = toX(i), y = toY(d.fatigue_tests || 0); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+        ctx.stroke();
+
+        if (trendData.length > 0) {
+            const step = Math.ceil(trendData.length / 5);
+            trendData.forEach((d, i) => {
+                if (i % step === 0) {
+                    ctx.fillStyle = '#6b7280'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+                    ctx.fillText(d.date ? d.date.slice(5) : '', toX(i), padding.top + plotH + 12);
+                }
+            });
+        }
+
+        ctx.fillStyle = '#2563eb'; ctx.fillRect(padding.left + 5, padding.top + 3, 10, 10);
+        ctx.fillStyle = '#374151'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText('拉伸', padding.left + 20, padding.top + 12);
+        ctx.fillStyle = '#7c3aed'; ctx.fillRect(padding.left + 65, padding.top + 3, 10, 10);
+        ctx.fillStyle = '#374151'; ctx.fillText('疲劳', padding.left + 80, padding.top + 12);
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
 {% endblock %}

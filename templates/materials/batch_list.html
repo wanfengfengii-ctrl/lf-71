@@ -6,8 +6,14 @@
     <div style="display: flex; gap: 0.5rem; align-items: center;">
         <form class="search-bar" method="get">
             <input type="text" name="q" placeholder="搜索批次编号或来源..." value="{{ search_query }}">
+            <select name="status" onchange="this.form.submit()">
+                <option value="">全部</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
             <button type="submit" class="btn btn-secondary btn-sm">搜索</button>
-            {% if search_query %}
+            {% if search_query or status_filter %}
                 <a href="{% url 'materials:batch_list' %}" class="btn btn-secondary btn-sm">清除</a>
             {% endif %}
         </form>
@@ -25,6 +31,7 @@
                     <th>直径(mm)</th>
                     <th>初始长度(mm)</th>
                     <th>测试次数</th>
+                    <th>疲劳测试</th>
                     <th>状态</th>
                     <th>创建时间</th>
                     <th>操作</th>
@@ -42,11 +49,18 @@
                     <td>{{ batch.diameter }}</td>
                     <td>{{ batch.initial_length }}</td>
                     <td>{{ batch.test_count }}</td>
+                    <td>{{ batch.fatigue_test_count }}</td>
                     <td>
-                        {% if batch.is_broken %}
-                            <span class="badge badge-danger">已断裂</span>
-                        {% else %}
+                        {% if batch.status == 'active' %}
                             <span class="badge badge-success">正常</span>
+                        {% elif batch.status == 'testing' %}
+                            <span class="badge badge-info">测试中</span>
+                        {% elif batch.status == 'broken' %}
+                            <span class="badge badge-danger">已断裂</span>
+                        {% elif batch.status == 'review' %}
+                            <span class="badge badge-warning">待审核</span>
+                        {% elif batch.status == 'archived' %}
+                            <span class="badge badge-gray">已归档</span>
                         {% endif %}
                     </td>
                     <td>{{ batch.created_at|date:"Y-m-d H:i" }}</td>
@@ -54,6 +68,9 @@
                         <div class="actions-row">
                             <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary btn-sm">详情</a>
                             <a href="{% url 'materials:batch_edit' batch.pk %}" class="btn btn-secondary btn-sm">编辑</a>
+                            {% if batch.status == 'broken' or batch.status == 'review' %}
+                                <a href="{% url 'materials:batch_review' batch.pk %}" class="btn btn-warning btn-sm">审核</a>
+                            {% endif %}
                             <a href="{% url 'materials:batch_delete' batch.pk %}" class="btn btn-danger btn-sm">删除</a>
                         </div>
                     </td>
@@ -63,7 +80,7 @@
         </table>
     {% else %}
         <div class="empty-state">
-            <p>{% if search_query %}未找到匹配的材料批次{% else %}暂无材料批次数据{% endif %}</p>
+            <p>{% if search_query or status_filter %}未找到匹配的材料批次{% else %}暂无材料批次数据{% endif %}</p>
             <a href="{% url 'materials:batch_create' %}" class="btn btn-primary" style="margin-top: 1rem;">
                 + 新增批次
             </a>

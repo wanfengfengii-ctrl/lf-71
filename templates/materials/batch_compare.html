@@ -19,7 +19,7 @@
                             <span class="batch-no">{{ batch.batch_number }}</span>
                             <span class="batch-src"> · {{ batch.material_source }}</span>
                         </div>
-                        <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+                        <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem; flex-wrap: wrap;">
                             <span style="font-size: 0.75rem; color: #6b7280;">
                                 Φ{{ batch.diameter }}mm · {{ batch.initial_length }}mm
                             </span>
@@ -49,223 +49,240 @@
 </div>
 
 {% if selected_batches %}
-<div class="card">
-    <div class="card-title">对比结果 - 拉力-伸长曲线</div>
-    <div class="chart-container">
-        <canvas id="compareChart" style="width: 100%; height: 100%;"></canvas>
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">对比结果 - 拉力-伸长曲线</div>
+        <div class="chart-container" style="height: 340px;">
+            <canvas id="compareChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">应力-应变曲线对比</div>
+        {% if stress_strain_datasets_json %}
+        <div class="chart-container" style="height: 340px;">
+            <canvas id="stressStrainCompareChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无足够应力-应变数据</p>
+        </div>
+        {% endif %}
     </div>
 </div>
 
 <div class="card">
-    <div class="card-title">批次参数对比</div>
-    <table>
-        <thead>
-            <tr>
-                <th>批次编号</th>
-                <th>材料来源</th>
-                <th>直径(mm)</th>
-                <th>初始长度(mm)</th>
-                <th>测试次数</th>
-                <th>最大拉力(N)</th>
-                <th>最大伸长量(mm)</th>
-                <th>平均回弹率</th>
-                <th>状态</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for batch in selected_batches %}
-            <tr>
-                <td>
-                    <a href="{% url 'materials:batch_detail' batch.pk %}" style="color: #2563eb; text-decoration: none; font-weight: 600;">
-                        {{ batch.batch_number }}
-                    </a>
-                </td>
-                <td>{{ batch.material_source }}</td>
-                <td>{{ batch.diameter }}</td>
-                <td>{{ batch.initial_length }}</td>
-                <td>{{ batch.test_count }}</td>
-                <td>
-                    {% with tests=batch.tension_tests.all %}
-                        {% if tests %}
-                            {% for t in tests|dictsortreversed:"tension_force"|slice:":1" %}
-                                {{ t.tension_force }}
-                            {% endfor %}
-                        {% else %}-{% endif %}
-                    {% endwith %}
-                </td>
-                <td>
-                    {% with tests=batch.tension_tests.all %}
-                        {% if tests %}
-                            {% for t in tests|dictsortreversed:"elongation"|slice:":1" %}
-                                {{ t.elongation }}
-                            {% endfor %}
-                        {% else %}-{% endif %}
-                    {% endwith %}
-                </td>
-                <td>
-                    {% with tests=batch.tension_tests.all %}
-                        {% if tests %}
-                            {% with rebound_tests=tests|dictsort:"rebound_rate" %}
-                                {% for t in rebound_tests %}{% if t.rebound_rate %}{{ t.rebound_rate }}%{% endif %}{% endfor %}
-                            {% endwith %}
-                        {% else %}-{% endif %}
-                    {% endwith %}
-                </td>
-                <td>
-                    {% if batch.is_broken %}
-                        <span class="badge badge-danger">已断裂</span>
-                    {% else %}
-                        <span class="badge badge-success">正常</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="card-title">批次性能参数对比</div>
+    <div style="overflow-x: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>批次编号</th>
+                    <th>材料来源</th>
+                    <th>直径(mm)</th>
+                    <th>初始长度(mm)</th>
+                    <th>拉伸测试</th>
+                    <th>疲劳测试</th>
+                    <th>杨氏模量(GPa)</th>
+                    <th>拉伸强度(MPa)</th>
+                    <th>断裂伸长率(%)</th>
+                    <th>最大拉力(N)</th>
+                    <th>最大伸长(mm)</th>
+                    <th>平均回弹率(%)</th>
+                    <th>疲劳循环次数</th>
+                    <th>疲劳极限(N)</th>
+                    <th>异常次数</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody id="compare-table-body"></tbody>
+        </table>
+    </div>
 </div>
 
 <script>
 (function() {
     const datasets = {{ chart_datasets_json|safe }};
     const canvas = document.getElementById('compareChart');
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
     function resize() {
         const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width - 32;
-        canvas.height = rect.height - 32;
-        draw();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
     }
 
     function draw() {
-        const w = canvas.width;
-        const h = canvas.height;
-        const padding = { top: 40, right: 120, bottom: 50, left: 60 };
-        const plotW = w - padding.left - padding.right;
-        const plotH = h - padding.top - padding.bottom;
-
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 40, right: 130, bottom: 50, left: 60 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
         ctx.clearRect(0, 0, w, h);
-
         if (datasets.length === 0) return;
 
         let allX = [], allY = [];
-        datasets.forEach(ds => {
-            ds.data.forEach(p => {
-                allX.push(p.x);
-                allY.push(p.y);
-            });
-        });
-
+        datasets.forEach(ds => { ds.data.forEach(p => { allX.push(p.x); allY.push(p.y); }); });
         if (allX.length === 0) return;
 
-        const maxX = Math.max(...allX) * 1.1;
-        const maxY = Math.max(...allY) * 1.1;
-        const minX = 0;
-        const minY = 0;
+        const maxX = Math.max(...allX) * 1.1, maxY = Math.max(...allY) * 1.1;
+        const minX = 0, minY = 0;
 
-        function toX(v) {
-            return padding.left + ((v - minX) / (maxX - minX)) * plotW;
-        }
-        function toY(v) {
-            return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH;
-        }
+        function toX(v) { return padding.left + ((v - minX) / (maxX - minX)) * plotW; }
+        function toY(v) { return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH; }
 
-        ctx.strokeStyle = '#e5e7eb';
-        ctx.lineWidth = 1;
-        const yTicks = 5;
-        for (let i = 0; i <= yTicks; i++) {
-            const yVal = minY + ((maxY - minY) * i / yTicks);
-            const y = toY(yVal);
-            ctx.beginPath();
-            ctx.moveTo(padding.left, y);
-            ctx.lineTo(padding.left + plotW, y);
-            ctx.stroke();
-
-            ctx.fillStyle = '#6b7280';
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const yVal = minY + ((maxY - minY) * i / 5), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
             ctx.fillText(yVal.toFixed(0) + ' N', padding.left - 8, y);
         }
-
-        const xTicks = 5;
-        for (let i = 0; i <= xTicks; i++) {
-            const xVal = minX + ((maxX - minX) * i / xTicks);
-            const x = toX(xVal);
-            ctx.beginPath();
-            ctx.moveTo(x, padding.top);
-            ctx.lineTo(x, padding.top + plotH);
-            ctx.stroke();
-
-            ctx.fillStyle = '#6b7280';
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
+        for (let i = 0; i <= 5; i++) {
+            const xVal = minX + ((maxX - minX) * i / 5), x = toX(xVal);
+            ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + plotH); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
             ctx.fillText(xVal.toFixed(1) + ' mm', x, padding.top + plotH + 6);
         }
 
-        ctx.strokeStyle = '#374151';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(padding.left, padding.top);
-        ctx.lineTo(padding.left, padding.top + plotH);
-        ctx.lineTo(padding.left + plotW, padding.top + plotH);
-        ctx.stroke();
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
 
-        ctx.fillStyle = '#374151';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#374151'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('伸长量 (mm)', padding.left + plotW / 2, h - 4);
-
-        ctx.save();
-        ctx.translate(14, padding.top + plotH / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('拉力值 (N)', 0, 0);
-        ctx.restore();
+        ctx.save(); ctx.translate(14, padding.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.fillText('拉力值 (N)', 0, 0); ctx.restore();
 
         datasets.forEach(ds => {
             if (ds.data.length > 1) {
-                ctx.strokeStyle = ds.color;
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ds.data.forEach((p, i) => {
-                    const x = toX(p.x);
-                    const y = toY(p.y);
-                    if (i === 0) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
-                });
+                ctx.strokeStyle = ds.color; ctx.lineWidth = 2; ctx.beginPath();
+                ds.data.forEach((p, i) => { const x = toX(p.x), y = toY(p.y); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
                 ctx.stroke();
             }
-
             ds.data.forEach(p => {
-                const x = toX(p.x);
-                const y = toY(p.y);
-                ctx.beginPath();
-                ctx.arc(x, y, 4, 0, Math.PI * 2);
-                ctx.fillStyle = ds.color;
-                ctx.fill();
+                const x = toX(p.x), y = toY(p.y);
+                ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = ds.color; ctx.fill();
             });
         });
 
-        ctx.fillStyle = '#374151';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
+        ctx.fillStyle = '#374151'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
         const legendX = padding.left + plotW + 15;
         datasets.forEach((ds, i) => {
-            const y = padding.top + i * 24;
-            ctx.fillStyle = ds.color;
-            ctx.fillRect(legendX, y, 14, 14);
-            ctx.fillStyle = '#374151';
-            ctx.fillText(ds.label, legendX + 20, y - 1);
+            const y = padding.top + i * 20;
+            ctx.fillStyle = ds.color; ctx.fillRect(legendX, y, 14, 14);
+            ctx.fillStyle = '#374151'; ctx.fillText(ds.label, legendX + 20, y - 1);
         });
     }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
 
-    resize();
-    window.addEventListener('resize', resize);
+<script>
+(function() {
+    const datasets = {{ stress_strain_datasets_json|safe }};
+    const canvas = document.getElementById('stressStrainCompareChart');
+    if (!canvas || !datasets || datasets.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 40, right: 130, bottom: 50, left: 60 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
+        ctx.clearRect(0, 0, w, h);
+
+        let allX = [], allY = [];
+        datasets.forEach(ds => { ds.data.forEach(p => { allX.push(p.x); allY.push(p.y); }); });
+        if (allX.length === 0) return;
+
+        const maxX = Math.max(...allX) * 1.1, maxY = Math.max(...allY) * 1.1;
+        const minX = 0, minY = 0;
+
+        function toX(v) { return padding.left + ((v - minX) / (maxX - minX)) * plotW; }
+        function toY(v) { return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH; }
+
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const yVal = minY + ((maxY - minY) * i / 5), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(yVal.toFixed(1) + ' MPa', padding.left - 8, y);
+        }
+        for (let i = 0; i <= 5; i++) {
+            const xVal = minX + ((maxX - minX) * i / 5), x = toX(xVal);
+            ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + plotH); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(xVal.toFixed(4), x, padding.top + plotH + 6);
+        }
+
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
+
+        ctx.fillStyle = '#374151'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('应变 (ε)', padding.left + plotW / 2, h - 4);
+        ctx.save(); ctx.translate(14, padding.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.fillText('应力 (MPa)', 0, 0); ctx.restore();
+
+        datasets.forEach(ds => {
+            if (ds.data.length > 1) {
+                ctx.strokeStyle = ds.color; ctx.lineWidth = 2; ctx.beginPath();
+                ds.data.forEach((p, i) => { const x = toX(p.x), y = toY(p.y); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+                ctx.stroke();
+            }
+            ds.data.forEach(p => {
+                const x = toX(p.x), y = toY(p.y);
+                ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = ds.color; ctx.fill();
+            });
+        });
+
+        ctx.fillStyle = '#374151'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        const legendX = padding.left + plotW + 15;
+        datasets.forEach((ds, i) => {
+            const y = padding.top + i * 20;
+            ctx.fillStyle = ds.color; ctx.fillRect(legendX, y, 14, 14);
+            ctx.fillStyle = '#374151'; ctx.fillText(ds.label, legendX + 20, y - 1);
+        });
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+
+<script>
+(function() {
+    const tableData = {{ comparison_table_json|safe }};
+    const tbody = document.getElementById('compare-table-body');
+    if (!tbody || !tableData) return;
+
+    tableData.forEach(row => {
+        const statusBadge = row.is_broken
+            ? '<span class="badge badge-danger">已断裂</span>'
+            : '<span class="badge badge-success">正常</span>';
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+            '<td style="font-weight:600;"><a href="/materials/batches/' + row.pk + '/" style="color:#2563eb;text-decoration:none;">' + row.batch_number + '</a></td>' +
+            '<td>' + row.source + '</td>' +
+            '<td>' + row.diameter + '</td>' +
+            '<td>' + row.initial_length + '</td>' +
+            '<td>' + row.tension_test_count + '</td>' +
+            '<td>' + row.fatigue_test_count + '</td>' +
+            '<td>' + (row.youngs_modulus ? row.youngs_modulus.toFixed(2) : '-') + '</td>' +
+            '<td>' + (row.tensile_strength ? row.tensile_strength.toFixed(2) : '-') + '</td>' +
+            '<td>' + (row.elongation_at_break ? row.elongation_at_break.toFixed(2) : '-') + '</td>' +
+            '<td>' + (row.max_force ? row.max_force.toFixed(2) : '-') + '</td>' +
+            '<td>' + (row.max_elongation ? row.max_elongation.toFixed(2) : '-') + '</td>' +
+            '<td>' + (row.avg_rebound ? row.avg_rebound.toFixed(2) + '%' : '-') + '</td>' +
+            '<td>' + (row.fatigue_cycles_to_failure || '-') + '</td>' +
+            '<td>' + (row.fatigue_endurance_limit ? row.fatigue_endurance_limit.toFixed(2) : '-') + '</td>' +
+            '<td>' + (row.anomaly_count || 0) + '</td>' +
+            '<td>' + statusBadge + '</td>';
+        tbody.appendChild(tr);
+    });
 })();
 </script>
 {% endif %}

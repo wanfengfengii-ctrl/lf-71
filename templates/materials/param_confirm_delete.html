@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}删除工艺参数 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>确认删除工艺参数</h1>
+    <a href="{% url 'materials:batch_detail' object.batch.pk %}" class="btn btn-secondary">返回批次详情</a>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <div style="padding: 1rem; background: #fef2f2; border-radius: 8px; margin-bottom: 1.5rem;">
+        <div style="color: #991b1b; font-weight: 600; margin-bottom: 0.5rem;">
+            ⚠️ 确认要删除此工艺参数吗？
+        </div>
+        <div style="color: #b91c1c; font-size: 0.9rem;">
+            删除操作不可恢复，请谨慎操作。
+        </div>
+    </div>
+
+    <div class="detail-grid" style="margin-bottom: 1.5rem;">
+        <div class="detail-item">
+            <div class="label">所属批次</div>
+            <div class="value">
+                <a href="{% url 'materials:batch_detail' object.batch.pk %}" style="color: #2563eb; text-decoration: none;">
+                    {{ object.batch.batch_number }}
+                </a>
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="label">参数名称</div>
+            <div class="value">{{ object.param_name }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">参数类型</div>
+            <div class="value">{{ object.get_param_type_display }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">参数值</div>
+            <div class="value">{{ object.param_value }} {{ object.param_unit|default:'' }}</div>
+        </div>
+        {% if object.description %}
+        <div class="detail-item" style="grid-column: 1 / -1;">
+            <div class="label">描述</div>
+            <div class="value">{{ object.description }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-actions" style="border-top: none; margin-top: 0; padding-top: 0;">
+            <button type="submit" class="btn btn-danger">确认删除</button>
+            <a href="{% url 'materials:batch_detail' object.batch.pk %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

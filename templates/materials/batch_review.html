@@ -1,0 +1,230 @@
+{% extends 'base.html' %}
+{% block title %}批次审核 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>批次审核</h1>
+        <div style="color: #6b7280; font-size: 0.9rem;">{{ batch.batch_number }} · {{ batch.material_source }}</div>
+    </div>
+    <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">返回批次详情</a>
+</div>
+
+<div class="two-col">
+    <div>
+        <div class="card" style="margin-bottom: 1rem;">
+            <div class="card-title">批次信息</div>
+            <div style="padding: 1rem; background: #f9fafb; border-radius: 8px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">批次编号</div>
+                        <div style="font-weight: 600;">{{ batch.batch_number }}</div>
+                    </div>
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">材料来源</div>
+                        <div style="font-weight: 600;">{{ batch.material_source }}</div>
+                    </div>
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">当前状态</div>
+                        <div>
+                            {% if batch.status == 'broken' %}
+                                <span class="badge badge-danger">{{ batch.get_status_display }}</span>
+                            {% elif batch.status == 'review' %}
+                                <span class="badge badge-warning">{{ batch.get_status_display }}</span>
+                            {% elif batch.status == 'archived' %}
+                                <span class="badge badge-gray">{{ batch.get_status_display }}</span>
+                            {% else %}
+                                <span class="badge badge-success">{{ batch.get_status_display }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if batch.broken_at %}
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">断裂时间</div>
+                        <div style="font-weight: 600;">{{ batch.broken_at|date:"Y-m-d H:i" }}</div>
+                    </div>
+                    {% endif %}
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">直径 / 初始长度</div>
+                        <div style="font-weight: 600;">{{ batch.diameter }} mm / {{ batch.initial_length }} mm</div>
+                    </div>
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">横截面积</div>
+                        <div style="font-weight: 600;">{{ batch.cross_sectional_area }} mm²</div>
+                    </div>
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">拉伸测试</div>
+                        <div style="font-weight: 600;">{{ batch.test_count }} 次</div>
+                    </div>
+                    <div>
+                        <div style="color: #6b7280; font-size: 0.85rem;">疲劳测试</div>
+                        <div style="font-weight: 600;">{{ batch.fatigue_test_count }} 次</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if broken_tests %}
+        <div class="card">
+            <div class="card-title">断裂测试记录</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>测试类型</th>
+                        <th>测试时间</th>
+                        <th>关键参数</th>
+                        <th>断裂原因</th>
+                        <th>是否异常断裂</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for test in broken_tests %}
+                    <tr>
+                        <td>
+                            {% if test.test_type == 'tension' %}
+                                <span style="color: #2563eb; font-weight: 500;">拉伸测试</span>
+                            {% else %}
+                                <span style="color: #7c3aed; font-weight: 500;">疲劳测试</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ test.test_time|date:"Y-m-d H:i" }}</td>
+                        <td style="font-size: 0.85rem;">
+                            {% if test.test_type == 'tension' %}
+                                拉力: {{ test.tension_force }} N<br>
+                                伸长: {{ test.elongation }} mm
+                                {% if test.stress %}
+                                    <br>应力: {{ test.stress }} MPa
+                                {% endif %}
+                            {% else %}
+                                加载力: {{ test.load_force }} N<br>
+                                循环次数: {{ test.cycle_count }}
+                                {% if test.stress_amplitude %}
+                                    <br>应力幅: {{ test.stress_amplitude }} MPa
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>{{ test.break_reason|default:"-"|truncatechars:40 }}</td>
+                        <td>
+                            {% if test.abnormal_break %}
+                                <span class="badge badge-danger">异常断裂</span>
+                            {% else %}
+                                <span class="badge badge-success">正常</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <div>
+        {% if flow_records %}
+        <div class="card" style="margin-bottom: 1rem;">
+            <div class="card-title">流程记录</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>操作类型</th>
+                        <th>操作人</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in flow_records %}
+                    <tr>
+                        <td style="white-space: nowrap;">{{ record.created_at|date:"m-d H:i" }}</td>
+                        <td>
+                            {% if record.action == 'detected' %}
+                                <span class="badge badge-danger">检测断裂</span>
+                            {% elif record.action == 'review_start' %}
+                                <span class="badge badge-warning">开始审核</span>
+                            {% elif record.action == 'archived' %}
+                                <span class="badge badge-gray">已归档</span>
+                            {% elif record.action == 'reactivated' %}
+                                <span class="badge badge-success">恢复正常</span>
+                            {% elif record.action == 'note_added' %}
+                                <span class="badge badge-info">备注添加</span>
+                            {% else %}
+                                {{ record.get_action_display }}
+                            {% endif %}
+                        </td>
+                        <td>{{ record.operator|default:"系统" }}</td>
+                        <td>{{ record.notes|default:"-"|truncatechars:30 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="margin-top: 0.75rem;">
+                <a href="{% url 'materials:batch_flow_note' batch.pk %}" class="btn btn-secondary btn-sm">+ 添加备注</a>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-title">审核操作</div>
+            <form method="post" novalidate>
+                {% csrf_token %}
+
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger">
+                        {% for error in form.non_field_errors %}
+                            <div>{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                <div class="form-group">
+                    <label for="{{ form.review_notes.id_for_label }}">{{ form.review_notes.label }}</label>
+                    <textarea name="{{ form.review_notes.name }}"
+                              id="{{ form.review_notes.id_for_label }}"
+                              class="form-control {% if form.review_notes.errors %}error{% endif %}"
+                              rows="3"
+                              placeholder="请填写审核意见，包括断裂原因分析、后续处理建议等...">{{ form.review_notes.value|default:'' }}</textarea>
+                    {% if form.review_notes.errors %}
+                        {% for error in form.review_notes.errors %}
+                            <div class="error-text">{{ error }}</div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label>{{ form.action.label }}</label>
+                    {% for choice_value, choice_label in form.action.field.choices %}
+                    <div style="margin-bottom: 0.75rem;">
+                        <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-weight: normal;">
+                            <input type="radio" name="{{ form.action.name }}" value="{{ choice_value }}"
+                                   {% if form.action.value == choice_value %}checked{% endif %}
+                                   style="margin-top: 0.25rem;">
+                            <div>
+                                <div style="font-weight: 600;">{{ choice_label }}</div>
+                                {% if choice_value == 'archive' %}
+                                    <div style="color: #6b7280; font-size: 0.85rem;">
+                                        将批次标记为已归档，表示断裂审核已完成，数据保留但不再参与正常测试
+                                    </div>
+                                {% elif choice_value == 'reactivate' %}
+                                    <div style="color: #6b7280; font-size: 0.85rem;">
+                                        将批次恢复为正常状态，清除所有断裂标记，可继续添加测试记录
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </label>
+                    </div>
+                    {% endfor %}
+                    {% if form.action.errors %}
+                        {% for error in form.action.errors %}
+                            <div class="error-text">{{ error }}</div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">提交审核</button>
+                    <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">取消</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

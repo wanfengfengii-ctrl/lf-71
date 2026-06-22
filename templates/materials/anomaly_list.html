@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% block title %}异常数据管理 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>异常数据管理</h1>
+</div>
+
+<div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 1.5rem;">
+    <div class="stat-card">
+        <div class="stat-label">异常总数</div>
+        <div class="stat-value">{{ anomaly_summary.total }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">未处理</div>
+        <div class="stat-value">{{ anomaly_summary.unresolved }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">已处理</div>
+        <div class="stat-value">{{ anomaly_summary.resolved }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">高严重度</div>
+        <div class="stat-value">{{ anomaly_summary.high_severity }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">中严重度</div>
+        <div class="stat-value">{{ anomaly_summary.medium_severity }}</div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 1rem;">
+    <form class="search-bar" method="get" style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end;">
+        <div>
+            <label style="display: block; font-size: 0.85rem; color: #6b7280; margin-bottom: 0.25rem;">处理状态</label>
+            <select name="resolved" class="form-control" style="min-width: 120px;">
+                <option value="">全部</option>
+                <option value="0" {% if resolved_filter == '0' %}selected{% endif %}>未处理</option>
+                <option value="1" {% if resolved_filter == '1' %}selected{% endif %}>已处理</option>
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.85rem; color: #6b7280; margin-bottom: 0.25rem;">严重程度</label>
+            <select name="severity" class="form-control" style="min-width: 120px;">
+                <option value="">全部</option>
+                {% for value, label in severity_choices %}
+                    <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.85rem; color: #6b7280; margin-bottom: 0.25rem;">数据来源</label>
+            <select name="source_type" class="form-control" style="min-width: 120px;">
+                <option value="">全部</option>
+                {% for value, label in source_type_choices %}
+                    <option value="{{ value }}" {% if source_type_filter == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.85rem; color: #6b7280; margin-bottom: 0.25rem;">材料来源</label>
+            <select name="material_source" class="form-control" style="min-width: 140px;">
+                <option value="">全部</option>
+                {% for source in material_sources %}
+                    <option value="{{ source }}" {% if material_source_filter == source %}selected{% endif %}>{{ source }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">筛选</button>
+        <a href="{% url 'materials:anomaly_list' %}" class="btn btn-secondary btn-sm">重置</a>
+    </form>
+</div>
+
+<div class="card">
+    {% if anomalies %}
+        <table>
+            <thead>
+                <tr>
+                    <th>批次编号</th>
+                    <th>材料来源</th>
+                    <th>数据来源</th>
+                    <th>异常描述</th>
+                    <th>严重程度</th>
+                    <th>状态</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for anomaly in anomalies %}
+                <tr>
+                    <td>
+                        <a href="{% url 'materials:batch_detail' anomaly.batch.pk %}" style="color: #2563eb; text-decoration: none; font-weight: 600;">
+                            {{ anomaly.batch.batch_number }}
+                        </a>
+                    </td>
+                    <td>{{ anomaly.batch.material_source }}</td>
+                    <td>{{ anomaly.get_source_type_display }}</td>
+                    <td>{{ anomaly.anomaly_description }}</td>
+                    <td>
+                        {% if anomaly.severity == 'low' %}
+                            <span class="badge badge-success">{{ anomaly.get_severity_display }}</span>
+                        {% elif anomaly.severity == 'medium' %}
+                            <span class="badge badge-warning">{{ anomaly.get_severity_display }}</span>
+                        {% elif anomaly.severity == 'high' %}
+                            <span class="badge badge-danger">{{ anomaly.get_severity_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if anomaly.is_resolved %}
+                            <span class="badge badge-success">已处理</span>
+                        {% else %}
+                            <span class="badge badge-danger">未处理</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ anomaly.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        {% if anomaly.is_resolved %}
+                            <span style="color: #6b7280; font-size: 0.85rem;">
+                                {{ anomaly.resolved_at|date:"m-d H:i" }}
+                                {% if anomaly.resolved_by %} · {{ anomaly.resolved_by }}{% endif %}
+                            </span>
+                        {% else %}
+                            <a href="{% url 'materials:anomaly_resolve' anomaly.pk %}" class="btn btn-warning btn-sm">处理</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="empty-state">
+            <p>暂无异常数据</p>
+        </div>
+    {% endif %}
+</div>
+
+{% if anomalies.has_other_pages %}
+<div style="display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem;">
+    {% if anomalies.has_previous %}
+        <a href="?page={{ anomalies.previous_page_number }}{% if resolved_filter %}&resolved={{ resolved_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if source_type_filter %}&source_type={{ source_type_filter }}{% endif %}{% if material_source_filter %}&material_source={{ material_source_filter }}{% endif %}" class="btn btn-secondary btn-sm">上一页</a>
+    {% endif %}
+    <span style="padding: 0.5rem 0.75rem; background: #eff6ff; color: #1d4ed8; border-radius: 6px; font-size: 0.85rem;">
+        第 {{ anomalies.number }} / {{ anomalies.paginator.num_pages }} 页
+    </span>
+    {% if anomalies.has_next %}
+        <a href="?page={{ anomalies.next_page_number }}{% if resolved_filter %}&resolved={{ resolved_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if source_type_filter %}&source_type={{ source_type_filter }}{% endif %}{% if material_source_filter %}&material_source={{ material_source_filter }}{% endif %}" class="btn btn-secondary btn-sm">下一页</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

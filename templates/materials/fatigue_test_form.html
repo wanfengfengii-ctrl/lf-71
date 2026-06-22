@@ -1,0 +1,334 @@
+{% extends 'base.html' %}
+{% block title %}{% if object.pk %}编辑{% else %}新增{% endif %}疲劳测试记录 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>
+        {% if object.pk %}编辑疲劳测试记录{% else %}新增疲劳测试记录{% endif %}
+        <small style="font-size: 1rem; color: #6b7280; font-weight: normal;">
+            - {{ batch.batch_number }} ({{ batch.material_source }})
+        </small>
+    </h1>
+    <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">
+        返回批次详情
+    </a>
+</div>
+
+{% if batch.is_broken and not object.pk %}
+<div class="alert alert-warning">
+    该批次样本已标记为断裂，通常不应继续添加测试记录。请谨慎操作。
+</div>
+{% endif %}
+
+{% if reference_stats %}
+<div class="card" style="max-width: 800px; padding: 1rem; margin-bottom: 1rem;">
+    <div style="font-size: 0.9rem; font-weight: 600; color: #1e3a5f; margin-bottom: 0.75rem;">
+        📊 批次参考统计 (基于 {{ reference_stats.test_count }} 条疲劳测试记录)
+    </div>
+    <div class="detail-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+        <div class="detail-item" style="padding: 0.3rem 0;">
+            <div class="label">加载力范围</div>
+            <div class="value">{{ reference_stats.min_load }} ~ {{ reference_stats.max_load }} N (均值 {{ reference_stats.avg_load }} N)</div>
+        </div>
+        <div class="detail-item" style="padding: 0.3rem 0;">
+            <div class="label">循环次数范围</div>
+            <div class="value">{{ reference_stats.min_cycles }} ~ {{ reference_stats.max_cycles }} (均值 {{ reference_stats.avg_cycles }})</div>
+        </div>
+    </div>
+    <div style="font-size: 0.8rem; color: #6b7280; margin-top: 0.5rem;">
+        💡 提示：若输入值与参考值偏差较大，系统会自动进行异常检测提醒
+    </div>
+</div>
+{% endif %}
+
+<div class="card" style="max-width: 800px;">
+    <form method="post" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="two-col">
+            <div>
+                <div class="card-title" style="font-size: 0.95rem; border-bottom: none; padding-bottom: 0; margin-bottom: 0.5rem;">
+                    基本测试参数 <span style="color: #dc2626;">*</span>
+                </div>
+
+                {% with field=form.load_force %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}<span class="required">*</span>
+                    </label>
+                    <input type="number" step="0.01"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}"
+                           oninput="updateFatigueCalc()">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% with field=form.cycle_count %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}<span class="required">*</span>
+                    </label>
+                    <input type="number" step="1"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}"
+                           oninput="updateFatigueCalc()">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% with field=form.frequency %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}<span class="required">*</span>
+                    </label>
+                    <input type="number" step="0.01"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% with field=form.load_ratio %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    <input type="number" step="0.01"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'0.1' }}"
+                           oninput="updateFatigueCalc()">
+                    <div style="color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;">
+                        应力比 R = σ_min / σ_max，范围 0~1，默认 0.1
+                    </div>
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                {% with field=form.test_time %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    <input type="datetime-local"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|date:'Y-m-d\TH:i'|default:'' }}">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                <div id="fatigue-preview" style="display:none; padding: 0.75rem; background: #faf5ff; border-radius: 8px;">
+                    <div style="font-size: 0.85rem; color: #6b21a8; font-weight: 600;">实时计算</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.35rem; font-size: 0.85rem;">
+                        <div style="color: #7c3aed;">最大应力(σ_max): <span id="preview-sigma-max">-</span> MPa</div>
+                        <div style="color: #7c3aed;">最小应力(σ_min): <span id="preview-sigma-min">-</span> MPa</div>
+                        <div style="color: #7c3aed;">应力幅(σ_a): <span id="preview-stress-amp">-</span> MPa</div>
+                        <div style="color: #7c3aed;">平均应力(σ_m): <span id="preview-mean-stress">-</span> MPa</div>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="card-title" style="font-size: 0.95rem; border-bottom: none; padding-bottom: 0; margin-bottom: 0.5rem;">
+                    测试结果
+                </div>
+
+                {% with field=form.result %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    <select name="{{ field.name }}"
+                            id="{{ field.id_for_label }}"
+                            class="form-control {% if field.errors %}error{% endif %}"
+                            onchange="toggleBreakFields()">
+                        <option value="intact" {% if field.value == 'intact' %}selected{% endif %}>完好</option>
+                        <option value="minor_damage" {% if field.value == 'minor_damage' %}selected{% endif %}>轻微损伤</option>
+                        <option value="major_damage" {% if field.value == 'major_damage' %}selected{% endif %}>严重损伤</option>
+                        <option value="broken" {% if field.value == 'broken' %}selected{% endif %}>断裂</option>
+                    </select>
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+
+                <div id="abnormal-break-field" style="display: none;">
+                    <div class="checkbox-group" style="margin-bottom: 0.75rem;">
+                        <input type="checkbox" name="abnormal_break" id="id_abnormal_break"
+                               {% if form.abnormal_break.value %}checked{% endif %}
+                               onchange="toggleBreakReason()">
+                        <label for="id_abnormal_break" style="font-weight: 500;">异常断裂</label>
+                    </div>
+                </div>
+
+                <div id="break_reason_field" style="display: none;">
+                    {% with field=form.break_reason %}
+                    <div class="form-group">
+                        <label for="{{ field.id_for_label }}">
+                            断裂原因<span id="break_reason_required" class="required" style="display: none;">*</span>
+                        </label>
+                        <textarea name="{{ field.name }}"
+                                  id="{{ field.id_for_label }}"
+                                  class="form-control {% if field.errors %}error{% endif %}"
+                                  rows="2">{{ field.value|default:'' }}</textarea>
+                        {% if field.errors %}
+                            {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                        {% endif %}
+                    </div>
+                    {% endwith %}
+                </div>
+
+                {% with field=form.elongation_after %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    <input type="number" step="0.01"
+                           name="{{ field.name }}"
+                           id="{{ field.id_for_label }}"
+                           class="form-control {% if field.errors %}error{% endif %}"
+                           value="{{ field.value|default:'' }}">
+                    {% if field.errors %}
+                        {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                    {% endif %}
+                </div>
+                {% endwith %}
+            </div>
+        </div>
+
+        <div class="card-title" style="font-size: 0.95rem; border-bottom: none; padding-bottom: 0; margin-top: 1rem; margin-bottom: 0.5rem;">
+            数据标记
+        </div>
+
+        <div class="checkbox-group">
+            <input type="checkbox" name="is_flagged" id="id_is_flagged"
+                   {% if form.is_flagged.value %}checked{% endif %}
+                   onchange="toggleFlagReason()">
+            <label for="id_is_flagged" style="font-weight: 500;">标记为异常数据</label>
+        </div>
+
+        <div id="flag_reason_field" style="display: none;">
+            {% with field=form.flag_reason %}
+            <div class="form-group" style="margin-top: 0.75rem;">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                <textarea name="{{ field.name }}"
+                          id="{{ field.id_for_label }}"
+                          class="form-control {% if field.errors %}error{% endif %}"
+                          rows="2">{{ field.value|default:'' }}</textarea>
+                {% if field.errors %}
+                    {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+                {% endif %}
+            </div>
+            {% endwith %}
+        </div>
+
+        {% if object.pk and object.flag_reason %}
+        <div style="padding: 0.75rem; background: #fef2f2; border-radius: 8px; color: #991b1b; margin-top: 0.75rem;">
+            <strong>异常标记原因：</strong>{{ object.flag_reason }}
+        </div>
+        {% endif %}
+
+        {% with field=form.notes %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <textarea name="{{ field.name }}"
+                      id="{{ field.id_for_label }}"
+                      class="form-control {% if field.errors %}error{% endif %}"
+                      rows="2">{{ field.value|default:'' }}</textarea>
+            {% if field.errors %}
+                {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+            {% endif %}
+        </div>
+        {% endwith %}
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                {% if object.pk %}保存修改{% else %}添加疲劳测试记录{% endif %}
+            </button>
+            <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+
+<script>
+const batchDiameter = {{ batch.diameter }};
+const crossSectionalArea = Math.PI * Math.pow(batchDiameter / 2, 2);
+
+function updateFatigueCalc() {
+    const loadForce = parseFloat(document.getElementById('id_load_force').value) || 0;
+    const loadRatio = parseFloat(document.getElementById('id_load_ratio').value);
+    const cycleCount = parseInt(document.getElementById('id_cycle_count').value) || 0;
+    const preview = document.getElementById('fatigue-preview');
+
+    if (loadForce > 0 && crossSectionalArea > 0 && cycleCount > 0) {
+        const R = !isNaN(loadRatio) && loadRatio >= 0 && loadRatio <= 1 ? loadRatio : 0.1;
+        const sigmaMax = loadForce / crossSectionalArea;
+        const sigmaMin = sigmaMax * R;
+        const stressAmp = (sigmaMax - sigmaMin) / 2;
+        const meanStress = (sigmaMax + sigmaMin) / 2;
+
+        document.getElementById('preview-sigma-max').textContent = sigmaMax.toFixed(2);
+        document.getElementById('preview-sigma-min').textContent = sigmaMin.toFixed(2);
+        document.getElementById('preview-stress-amp').textContent = stressAmp.toFixed(2);
+        document.getElementById('preview-mean-stress').textContent = meanStress.toFixed(2);
+        preview.style.display = 'block';
+    } else {
+        preview.style.display = 'none';
+    }
+}
+
+function toggleBreakFields() {
+    const result = document.getElementById('id_result').value;
+    const abnormalField = document.getElementById('abnormal-break-field');
+    const reasonField = document.getElementById('break_reason_field');
+    const reasonRequired = document.getElementById('break_reason_required');
+
+    if (result === 'broken') {
+        abnormalField.style.display = 'block';
+        reasonField.style.display = 'block';
+    } else {
+        abnormalField.style.display = 'none';
+        reasonField.style.display = 'none';
+    }
+}
+
+function toggleBreakReason() {
+    const isAbnormal = document.getElementById('id_abnormal_break').checked;
+    const reasonRequired = document.getElementById('break_reason_required');
+    reasonRequired.style.display = isAbnormal ? 'inline' : 'none';
+}
+
+function toggleFlagReason() {
+    const isFlagged = document.getElementById('id_is_flagged').checked;
+    const flagReasonField = document.getElementById('flag_reason_field');
+    flagReasonField.style.display = isFlagged ? 'block' : 'none';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateFatigueCalc();
+    toggleBreakFields();
+    toggleBreakReason();
+    toggleFlagReason();
+});
+</script>
+{% endblock %}

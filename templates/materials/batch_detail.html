@@ -7,20 +7,33 @@
             {{ batch.batch_number }}
             <small style="font-size: 1rem; color: #6b7280; font-weight: normal;">{{ batch.material_source }}</small>
         </h1>
-        <div style="display: flex; gap: 0.5rem; align-items: center;">
-            {% if batch.is_broken %}
-                <span class="badge badge-danger">已断裂</span>
-            {% else %}
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            {% if batch.status == 'active' %}
                 <span class="badge badge-success">正常</span>
+            {% elif batch.status == 'testing' %}
+                <span class="badge badge-info">测试中</span>
+            {% elif batch.status == 'broken' %}
+                <span class="badge badge-danger">已断裂</span>
+            {% elif batch.status == 'review' %}
+                <span class="badge badge-warning">待审核</span>
+            {% elif batch.status == 'archived' %}
+                <span class="badge badge-gray">已归档</span>
             {% endif %}
             <span style="color: #6b7280; font-size: 0.85rem;">创建于 {{ batch.created_at|date:"Y-m-d H:i" }}</span>
         </div>
     </div>
-    <div style="display: flex; gap: 0.5rem;">
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
         <a href="{% url 'materials:batch_list' %}" class="btn btn-secondary">返回列表</a>
         <a href="{% url 'materials:batch_edit' batch.pk %}" class="btn btn-secondary">编辑批次</a>
-        {% if not batch.is_broken %}
-            <a href="{% url 'materials:test_create' batch.pk %}" class="btn btn-primary">+ 添加测试</a>
+        <a href="{% url 'materials:batch_flow_note' batch.pk %}" class="btn btn-secondary">+ 流程备注</a>
+        {% if batch.status == 'broken' or batch.status == 'review' %}
+            <a href="{% url 'materials:batch_review' batch.pk %}" class="btn" style="background: #f59e0b; color: #fff;">审核</a>
+        {% endif %}
+        {% if batch.can_add_test %}
+            <a href="{% url 'materials:test_create' batch.pk %}" class="btn btn-primary">+ 添加拉伸测试</a>
+        {% endif %}
+        {% if batch.can_add_fatigue_test %}
+            <a href="{% url 'materials:fatigue_test_create' batch.pk %}" class="btn btn-success">+ 添加疲劳测试</a>
         {% endif %}
     </div>
 </div>
@@ -45,51 +58,279 @@
             <div class="value">{{ batch.initial_length }} mm</div>
         </div>
         <div class="detail-item">
-            <div class="label">测试次数</div>
-            <div class="value">{{ tests|length }} 次</div>
-        </div>
-        <div class="detail-item">
             <div class="label">状态</div>
             <div class="value">
-                {% if batch.is_broken %}
-                    <span class="badge badge-danger">已断裂</span>
-                {% else %}
+                {% if batch.status == 'active' %}
                     <span class="badge badge-success">正常</span>
+                {% elif batch.status == 'testing' %}
+                    <span class="badge badge-info">测试中</span>
+                {% elif batch.status == 'broken' %}
+                    <span class="badge badge-danger">已断裂</span>
+                {% elif batch.status == 'review' %}
+                    <span class="badge badge-warning">待审核</span>
+                {% elif batch.status == 'archived' %}
+                    <span class="badge badge-gray">已归档</span>
                 {% endif %}
             </div>
         </div>
+        <div class="detail-item">
+            <div class="label">横截面积</div>
+            <div class="value">{{ batch.cross_sectional_area|default:"-" }} mm²</div>
+        </div>
+        {% if batch.broken_at %}
+        <div class="detail-item">
+            <div class="label">断裂时间</div>
+            <div class="value">{{ batch.broken_at|date:"Y-m-d H:i" }}</div>
+        </div>
+        {% endif %}
+        {% if batch.reviewed_at %}
+        <div class="detail-item">
+            <div class="label">审核时间</div>
+            <div class="value">{{ batch.reviewed_at|date:"Y-m-d H:i" }}</div>
+        </div>
+        {% endif %}
+        {% if batch.review_notes %}
+        <div class="detail-item">
+            <div class="label">审核备注</div>
+            <div class="value">{{ batch.review_notes }}</div>
+        </div>
+        {% endif %}
+        <div class="detail-item">
+            <div class="label">拉伸测试次数</div>
+            <div class="value">{{ tests|length }} 次</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">疲劳测试次数</div>
+            <div class="value">{{ fatigue_tests|length }} 次</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">异常数据次数</div>
+            <div class="value">{{ anomaly_logs|length }} 次</div>
+        </div>
         {% if batch.description %}
         <div class="detail-item" style="grid-column: 1 / -1;">
-            <div class="label">备注说明</div>
+            <div class="label">备注</div>
             <div class="value">{{ batch.description }}</div>
         </div>
         {% endif %}
     </div>
 </div>
 
+{% if batch_stats_summary %}
 <div class="card">
-    <div class="card-title">拉力-伸长曲线</div>
-    {% if tests %}
-        <div class="chart-container">
-            <canvas id="tensionChart" style="width: 100%; height: 100%;"></canvas>
+    <div class="card-title">力学性能派生指标</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <div class="label">杨氏模量 (E)</div>
+            <div class="value">
+                {% if batch.youngs_modulus %}
+                    {{ batch.youngs_modulus|floatformat:2 }} GPa
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
         </div>
-    {% else %}
-        <div class="empty-state">
-            <p>暂无测试数据，无法绘制曲线</p>
-            {% if not batch.is_broken %}
-                <a href="{% url 'materials:test_create' batch.pk %}" class="btn btn-primary" style="margin-top: 1rem;">
-                    + 添加第一次测试
-                </a>
+        <div class="detail-item">
+            <div class="label">拉伸强度 (σ)</div>
+            <div class="value">
+                {% if batch.tensile_strength %}
+                    {{ batch.tensile_strength|floatformat:2 }} MPa
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="label">断裂伸长率</div>
+            <div class="value">
+                {% if batch.elongation_at_break %}
+                    {{ batch.elongation_at_break|floatformat:2 }}%
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="label">最大拉力</div>
+            <div class="value">
+                {% if batch.max_tension_force %}
+                    {{ batch.max_tension_force|floatformat:2 }} N
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="label">最大伸长量</div>
+            <div class="value">
+                {% if batch.max_elongation %}
+                    {{ batch.max_elongation|floatformat:2 }} mm
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="label">平均回弹率</div>
+            <div class="value">
+                {% if batch.avg_rebound_rate %}
+                    {{ batch.avg_rebound_rate|floatformat:2 }}%
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="label">疲劳断裂循环次数</div>
+            <div class="value">
+                {% if batch.fatigue_cycles_to_failure %}
+                    {{ batch.fatigue_cycles_to_failure }} 次
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="label">疲劳极限</div>
+            <div class="value">
+                {% if batch.fatigue_endurance_limit %}
+                    {{ batch.fatigue_endurance_limit|floatformat:2 }} N
+                {% else %}<span style="color: #9ca3af;">-</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    {% if comprehensive_stats and comprehensive_stats.tension %}
+    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;">
+        <div style="font-size: 0.9rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">拉伸测试统计详情</div>
+        <div class="detail-grid">
+            {% if comprehensive_stats.tension.force %}
+            <div class="detail-item">
+                <div class="label">拉力均值</div>
+                <div class="value">{{ comprehensive_stats.tension.force.mean|floatformat:2 }} N</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">拉力标准差</div>
+                <div class="value">{{ comprehensive_stats.tension.force.std|floatformat:2 }} N</div>
+            </div>
+            {% endif %}
+            {% if comprehensive_stats.tension.elongation %}
+            <div class="detail-item">
+                <div class="label">伸长量均值</div>
+                <div class="value">{{ comprehensive_stats.tension.elongation.mean|floatformat:2 }} mm</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">伸长量标准差</div>
+                <div class="value">{{ comprehensive_stats.tension.elongation.std|floatformat:2 }} mm</div>
+            </div>
+            {% endif %}
+            {% if comprehensive_stats.tension.rebound %}
+            <div class="detail-item">
+                <div class="label">回弹率均值</div>
+                <div class="value">{{ comprehensive_stats.tension.rebound.mean|floatformat:2 }}%</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">回弹率标准差</div>
+                <div class="value">{{ comprehensive_stats.tension.rebound.std|floatformat:2 }}%</div>
+            </div>
             {% endif %}
         </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if process_params %}
+<div class="card">
+    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>工艺参数</span>
+        <a href="{% url 'materials:param_create' batch.pk %}" class="btn btn-primary btn-sm">+ 添加工艺参数</a>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>参数名称</th>
+                <th>参数类型</th>
+                <th>参数值</th>
+                <th>单位</th>
+                <th>描述</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for param in process_params %}
+            <tr>
+                <td style="font-weight: 600;">{{ param.param_name }}</td>
+                <td>{{ param.get_param_type_display }}</td>
+                <td>{{ param.param_value }}</td>
+                <td>{{ param.param_unit|default:"-" }}</td>
+                <td>{{ param.description|default:"-" }}</td>
+                <td>
+                    <div class="actions-row">
+                        <a href="{% url 'materials:param_edit' param.pk %}" class="btn btn-secondary btn-sm">编辑</a>
+                        <a href="{% url 'materials:param_delete' param.pk %}" class="btn btn-danger btn-sm">删除</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>工艺参数</span>
+        <a href="{% url 'materials:param_create' batch.pk %}" class="btn btn-primary btn-sm">+ 添加工艺参数</a>
+    </div>
+    <div class="empty-state" style="padding: 1.5rem;">
+        <p>暂无工艺参数记录</p>
+    </div>
+</div>
+{% endif %}
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">拉力-伸长曲线</div>
+        {% if tests %}
+            <div class="chart-container" style="height: 320px;">
+                <canvas id="tensionChart" style="width: 100%; height: 100%;"></canvas>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>暂无测试数据，无法绘制曲线</p>
+                {% if batch.can_add_test %}
+                    <a href="{% url 'materials:test_create' batch.pk %}" class="btn btn-primary" style="margin-top: 1rem;">
+                        + 添加第一次测试
+                    </a>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-title">应力-应变曲线</div>
+        {% if stress_strain_json %}
+            <div class="chart-container" style="height: 320px;">
+                <canvas id="stressStrainChart" style="width: 100%; height: 100%;"></canvas>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>暂无足够数据绘制应力-应变曲线</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="two-col">
+    {% if fatigue_tests %}
+    <div class="card">
+        <div class="card-title">疲劳测试-S-N曲线</div>
+        <div class="chart-container" style="height: 320px;">
+            <canvas id="fatigueChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if rebound_chart_json %}
+    <div class="card">
+        <div class="card-title">回弹率趋势</div>
+        <div class="chart-container" style="height: 320px;">
+            <canvas id="reboundChart" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
     {% endif %}
 </div>
 
 <div class="card">
     <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-        <span>测试记录</span>
-        {% if not batch.is_broken %}
-            <a href="{% url 'materials:test_create' batch.pk %}" class="btn btn-primary btn-sm">+ 添加测试</a>
+        <span>拉伸测试记录</span>
+        {% if batch.can_add_test %}
+            <a href="{% url 'materials:test_create' batch.pk %}" class="btn btn-primary btn-sm">+ 添加拉伸测试</a>
         {% endif %}
     </div>
     {% if tests %}
@@ -100,10 +341,11 @@
                     <th>测试时间</th>
                     <th>拉力值(N)</th>
                     <th>伸长量(mm)</th>
-                    <th>回弹前(mm)</th>
-                    <th>回弹后(mm)</th>
+                    <th>应力(MPa)</th>
+                    <th>应变(%)</th>
                     <th>回弹率</th>
                     <th>状态</th>
+                    <th>异常标记</th>
                     <th>操作</th>
                 </tr>
             </thead>
@@ -114,8 +356,8 @@
                     <td>{{ test.test_time|date:"Y-m-d H:i" }}</td>
                     <td>{{ test.tension_force }}</td>
                     <td>{{ test.elongation }}</td>
-                    <td>{{ test.length_before_rebound|default:"-" }}</td>
-                    <td>{{ test.length_after_rebound|default:"-" }}</td>
+                    <td>{% if test.stress %}{{ test.stress|floatformat:2 }}{% else %}-{% endif %}</td>
+                    <td>{% if test.strain %}{{ test.strain|floatformat:4 }}{% else %}-{% endif %}</td>
                     <td>
                         {% if test.rebound_rate is not None %}
                             <span class="badge badge-info">{{ test.rebound_rate }}%</span>
@@ -134,6 +376,13 @@
                         {% endif %}
                     </td>
                     <td>
+                        {% if test.is_flagged %}
+                            <span class="badge badge-warning">异常</span>
+                        {% else %}
+                            <span style="color: #9ca3af;">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
                         <div class="actions-row">
                             <a href="{% url 'materials:test_edit' test.pk %}" class="btn btn-secondary btn-sm">编辑</a>
                             <a href="{% url 'materials:test_delete' test.pk %}" class="btn btn-danger btn-sm">删除</a>
@@ -142,14 +391,21 @@
                 </tr>
                 {% if test.break_reason %}
                 <tr>
-                    <td colspan="9" style="background: #fef9c3; color: #854d0e; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                    <td colspan="10" style="background: #fef9c3; color: #854d0e; padding: 0.5rem 1rem; font-size: 0.85rem;">
                         <strong>断裂原因：</strong>{{ test.break_reason }}
+                    </td>
+                </tr>
+                {% endif %}
+                {% if test.flag_reason %}
+                <tr>
+                    <td colspan="10" style="background: #fef3c7; color: #92400e; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <strong>异常标记原因：</strong>{{ test.flag_reason }}
                     </td>
                 </tr>
                 {% endif %}
                 {% if test.notes %}
                 <tr>
-                    <td colspan="9" style="background: #f0f9ff; color: #075985; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                    <td colspan="10" style="background: #f0f9ff; color: #075985; padding: 0.5rem 1rem; font-size: 0.85rem;">
                         <strong>备注：</strong>{{ test.notes }}
                     </td>
                 </tr>
@@ -159,8 +415,8 @@
         </table>
     {% else %}
         <div class="empty-state">
-            <p>暂无测试记录</p>
-            {% if not batch.is_broken %}
+            <p>暂无拉伸测试记录</p>
+            {% if batch.can_add_test %}
                 <a href="{% url 'materials:test_create' batch.pk %}" class="btn btn-primary" style="margin-top: 1rem;">
                     + 添加第一次测试
                 </a>
@@ -169,11 +425,209 @@
     {% endif %}
 </div>
 
+<div class="card">
+    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>疲劳测试记录</span>
+        {% if batch.can_add_fatigue_test %}
+            <a href="{% url 'materials:fatigue_test_create' batch.pk %}" class="btn btn-success btn-sm">+ 添加疲劳测试</a>
+        {% endif %}
+    </div>
+    {% if fatigue_tests %}
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>测试时间</th>
+                    <th>加载力(N)</th>
+                    <th>循环次数</th>
+                    <th>频率(Hz)</th>
+                    <th>应力幅(MPa)</th>
+                    <th>平均应力(MPa)</th>
+                    <th>损伤程度</th>
+                    <th>测试结果</th>
+                    <th>异常标记</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ft in fatigue_tests %}
+                <tr>
+                    <td>{{ forloop.counter }}</td>
+                    <td>{{ ft.test_time|date:"Y-m-d H:i" }}</td>
+                    <td>{{ ft.load_force }}</td>
+                    <td>{{ ft.cycle_count }}</td>
+                    <td>{{ ft.frequency|default:"-" }}</td>
+                    <td>{% if ft.stress_amplitude %}{{ ft.stress_amplitude|floatformat:2 }}{% else %}-{% endif %}</td>
+                    <td>{% if ft.mean_stress %}{{ ft.mean_stress|floatformat:2 }}{% else %}-{% endif %}</td>
+                    <td>
+                        {% if ft.damage_severity %}
+                            {% if ft.damage_severity < 0.3 %}
+                                <span class="badge badge-success">轻微</span>
+                            {% elif ft.damage_severity < 0.7 %}
+                                <span class="badge badge-warning">中度</span>
+                            {% else %}
+                                <span class="badge badge-danger">严重</span>
+                            {% endif %}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        {% if ft.result == 'intact' %}
+                            <span class="badge badge-success">完好</span>
+                        {% elif ft.result == 'minor_damage' %}
+                            <span class="badge badge-warning">轻微损伤</span>
+                        {% elif ft.result == 'major_damage' %}
+                            <span class="badge" style="background: #ffedd5; color: #9a3412;">严重损伤</span>
+                        {% elif ft.result == 'broken' %}
+                            <span class="badge badge-danger">断裂</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if ft.is_flagged %}
+                            <span class="badge badge-warning">异常</span>
+                        {% else %}
+                            <span style="color: #9ca3af;">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="actions-row">
+                            <a href="{% url 'materials:fatigue_test_edit' ft.pk %}" class="btn btn-secondary btn-sm">编辑</a>
+                            <a href="{% url 'materials:fatigue_test_delete' ft.pk %}" class="btn btn-danger btn-sm">删除</a>
+                        </div>
+                    </td>
+                </tr>
+                {% if ft.flag_reason %}
+                <tr>
+                    <td colspan="11" style="background: #fef3c7; color: #92400e; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <strong>异常标记原因：</strong>{{ ft.flag_reason }}
+                    </td>
+                </tr>
+                {% endif %}
+                {% if ft.notes %}
+                <tr>
+                    <td colspan="11" style="background: #f0f9ff; color: #075985; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <strong>备注：</strong>{{ ft.notes }}
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="empty-state">
+            <p>暂无疲劳测试记录</p>
+            {% if batch.can_add_fatigue_test %}
+                <a href="{% url 'materials:fatigue_test_create' batch.pk %}" class="btn btn-success" style="margin-top: 1rem;">
+                    + 添加第一次疲劳测试
+                </a>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+
+{% if flow_records %}
+<div class="card">
+    <div class="card-title">断裂流程记录</div>
+    <table>
+        <thead>
+            <tr>
+                <th>时间</th>
+                <th>操作类型</th>
+                <th>操作人</th>
+                <th>备注</th>
+                <th>来源</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for record in flow_records %}
+            <tr>
+                <td>{{ record.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    {% if record.action == 'detected' %}
+                        <span class="badge badge-danger">检测到断裂</span>
+                    {% elif record.action == 'review_start' %}
+                        <span class="badge badge-warning">开始审核</span>
+                    {% elif record.action == 'archived' %}
+                        <span class="badge badge-gray">已归档</span>
+                    {% elif record.action == 'reactivated' %}
+                        <span class="badge badge-success">恢复正常</span>
+                    {% elif record.action == 'note_added' %}
+                        <span class="badge badge-info">备注添加</span>
+                    {% else %}
+                        {{ record.get_action_display }}
+                    {% endif %}
+                </td>
+                <td>{{ record.operator|default:"系统" }}</td>
+                <td>{{ record.notes|default:"-" }}</td>
+                <td>
+                    {% if record.source_test_id and record.source_test_type %}
+                        {{ record.get_source_test_type_display }} #{{ record.source_test_id }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if anomaly_logs %}
+<div class="card">
+    <div class="card-title">异常日志</div>
+    <table>
+        <thead>
+            <tr>
+                <th>数据来源</th>
+                <th>异常描述</th>
+                <th>严重程度</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in anomaly_logs %}
+            <tr>
+                <td>{{ log.get_source_type_display }}</td>
+                <td>{{ log.anomaly_description }}</td>
+                <td>
+                    {% if log.severity == 'low' %}
+                        <span class="badge badge-success">{{ log.get_severity_display }}</span>
+                    {% elif log.severity == 'medium' %}
+                        <span class="badge badge-warning">{{ log.get_severity_display }}</span>
+                    {% elif log.severity == 'high' %}
+                        <span class="badge badge-danger">{{ log.get_severity_display }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if log.is_resolved %}
+                        <span class="badge badge-success">已处理</span>
+                    {% else %}
+                        <span class="badge badge-danger">未处理</span>
+                    {% endif %}
+                </td>
+                <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    {% if not log.is_resolved %}
+                        <a href="{% url 'materials:anomaly_resolve' log.pk %}" class="btn btn-secondary btn-sm">处理</a>
+                    {% else %}
+                        <span style="color: #9ca3af;">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 {% if tests %}
 <script>
 (function() {
     const data = {{ chart_data_json|safe }};
     const canvas = document.getElementById('tensionChart');
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
     function resize() {
@@ -191,122 +645,276 @@
         const plotH = h - padding.top - padding.bottom;
 
         ctx.clearRect(0, 0, w, h);
-
         if (data.length === 0) return;
 
         const maxX = Math.max(...data.map(d => d.x)) * 1.1;
         const maxY = Math.max(...data.map(d => d.y)) * 1.1;
-        const minX = 0;
-        const minY = 0;
+        const minX = 0, minY = 0;
 
-        function toX(v) {
-            return padding.left + ((v - minX) / (maxX - minX)) * plotW;
-        }
-        function toY(v) {
-            return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH;
-        }
+        function toX(v) { return padding.left + ((v - minX) / (maxX - minX)) * plotW; }
+        function toY(v) { return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH; }
 
         ctx.strokeStyle = '#e5e7eb';
         ctx.lineWidth = 1;
-        const yTicks = 5;
-        for (let i = 0; i <= yTicks; i++) {
-            const yVal = minY + ((maxY - minY) * i / yTicks);
+        for (let i = 0; i <= 5; i++) {
+            const yVal = minY + ((maxY - minY) * i / 5);
             const y = toY(yVal);
-            ctx.beginPath();
-            ctx.moveTo(padding.left, y);
-            ctx.lineTo(padding.left + plotW, y);
-            ctx.stroke();
-
-            ctx.fillStyle = '#6b7280';
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'middle';
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
             ctx.fillText(yVal.toFixed(0) + ' N', padding.left - 8, y);
         }
-
-        const xTicks = 5;
-        for (let i = 0; i <= xTicks; i++) {
-            const xVal = minX + ((maxX - minX) * i / xTicks);
+        for (let i = 0; i <= 5; i++) {
+            const xVal = minX + ((maxX - minX) * i / 5);
             const x = toX(xVal);
-            ctx.beginPath();
-            ctx.moveTo(x, padding.top);
-            ctx.lineTo(x, padding.top + plotH);
-            ctx.stroke();
-
-            ctx.fillStyle = '#6b7280';
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
+            ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + plotH); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
             ctx.fillText(xVal.toFixed(1) + ' mm', x, padding.top + plotH + 6);
         }
 
-        ctx.strokeStyle = '#374151';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(padding.left, padding.top);
-        ctx.lineTo(padding.left, padding.top + plotH);
-        ctx.lineTo(padding.left + plotW, padding.top + plotH);
-        ctx.stroke();
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
 
-        ctx.fillStyle = '#374151';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#374151'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('伸长量 (mm)', padding.left + plotW / 2, h - 4);
-
-        ctx.save();
-        ctx.translate(14, padding.top + plotH / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('拉力值 (N)', 0, 0);
-        ctx.restore();
+        ctx.save(); ctx.translate(14, padding.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.fillText('拉力值 (N)', 0, 0); ctx.restore();
 
         if (data.length > 1) {
-            ctx.strokeStyle = '#2563eb';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            data.forEach((d, i) => {
-                const x = toX(d.x);
-                const y = toY(d.y);
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            });
+            ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 2; ctx.beginPath();
+            data.forEach((d, i) => { const x = toX(d.x), y = toY(d.y); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
             ctx.stroke();
         }
 
         data.forEach(d => {
-            const x = toX(d.x);
-            const y = toY(d.y);
-            ctx.beginPath();
-            ctx.arc(x, y, 5, 0, Math.PI * 2);
-            ctx.fillStyle = d.broken ? '#dc2626' : '#2563eb';
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
+            const x = toX(d.x), y = toY(d.y);
+            ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = d.flagged && !d.broken ? '#f59e0b' : d.broken ? '#dc2626' : '#2563eb';
+            ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
         });
 
-        if (data.length > 0) {
-            ctx.fillStyle = '#374151';
-            ctx.font = '12px sans-serif';
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'top';
-            const legendY = padding.top + 5;
-            const legendX = padding.left + plotW - 10;
-            ctx.fillStyle = '#2563eb';
-            ctx.fillRect(legendX - 90, legendY, 12, 12);
-            ctx.fillStyle = '#374151';
-            ctx.fillText('正常测试点', legendX - 95, legendY);
-            ctx.fillStyle = '#dc2626';
-            ctx.fillRect(legendX - 90, legendY + 20, 12, 12);
-            ctx.fillStyle = '#374151';
-            ctx.fillText('断裂点', legendX - 95, legendY + 20);
-        }
+        const legendX = padding.left + plotW - 10, legendY = padding.top + 5;
+        ctx.fillStyle = '#374151'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+        ['#2563eb', '#f59e0b', '#dc2626'].forEach((c, i) => {
+            ctx.fillStyle = c; ctx.fillRect(legendX - 90, legendY + i * 20, 12, 12);
+        });
+        ctx.fillStyle = '#374151';
+        ctx.fillText('正常测试点', legendX - 95, legendY);
+        ctx.fillText('异常标记点', legendX - 95, legendY + 20);
+        ctx.fillText('断裂点', legendX - 95, legendY + 40);
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+
+<script>
+(function() {
+    const data = {{ stress_strain_json|safe }};
+    const canvas = document.getElementById('stressStrainChart');
+    if (!canvas || !data || data.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32;
+        canvas.height = rect.height - 32;
+        draw();
     }
 
-    resize();
-    window.addEventListener('resize', resize);
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 30, right: 30, bottom: 50, left: 60 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
+        ctx.clearRect(0, 0, w, h);
+
+        const maxX = Math.max(...data.map(d => d.x)) * 1.1;
+        const maxY = Math.max(...data.map(d => d.y)) * 1.1;
+        const minX = 0, minY = 0;
+
+        function toX(v) { return padding.left + ((v - minX) / (maxX - minX)) * plotW; }
+        function toY(v) { return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH; }
+
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const yVal = minY + ((maxY - minY) * i / 5), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(yVal.toFixed(1) + ' MPa', padding.left - 8, y);
+        }
+        for (let i = 0; i <= 5; i++) {
+            const xVal = minX + ((maxX - minX) * i / 5), x = toX(xVal);
+            ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + plotH); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(xVal.toFixed(4), x, padding.top + plotH + 6);
+        }
+
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
+
+        ctx.fillStyle = '#374151'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('应变 (ε)', padding.left + plotW / 2, h - 4);
+        ctx.save(); ctx.translate(14, padding.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.fillText('应力 (MPa)', 0, 0); ctx.restore();
+
+        if (data.length > 1) {
+            ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath();
+            data.forEach((d, i) => { const x = toX(d.x), y = toY(d.y); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+            ctx.stroke();
+        }
+        data.forEach(d => {
+            const x = toX(d.x), y = toY(d.y);
+            ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = d.flagged && !d.broken ? '#f59e0b' : d.broken ? '#dc2626' : '#16a34a';
+            ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+        });
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+{% endif %}
+
+{% if fatigue_tests %}
+<script>
+(function() {
+    const data = {{ fatigue_chart_data_json|safe }};
+    const canvas = document.getElementById('fatigueChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const colorMap = { 'intact': '#16a34a', 'minor_damage': '#f59e0b', 'major_damage': '#ea580c', 'broken': '#dc2626' };
+    const labelMap = { 'intact': '完好', 'minor_damage': '轻微损伤', 'major_damage': '严重损伤', 'broken': '断裂' };
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 30, right: 30, bottom: 50, left: 60 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
+        ctx.clearRect(0, 0, w, h);
+        if (data.length === 0) return;
+
+        const maxX = Math.max(...data.map(d => d.x)) * 1.1;
+        const maxY = Math.max(...data.map(d => d.y)) * 1.1;
+        const minX = 0, minY = 0;
+
+        function toX(v) { return padding.left + ((v - minX) / (maxX - minX)) * plotW; }
+        function toY(v) { return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH; }
+
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const yVal = minY + ((maxY - minY) * i / 5), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(yVal.toFixed(0) + ' N', padding.left - 8, y);
+        }
+        for (let i = 0; i <= 5; i++) {
+            const xVal = minX + ((maxX - minX) * i / 5), x = toX(xVal);
+            ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + plotH); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(xVal.toFixed(0), x, padding.top + plotH + 6);
+        }
+
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
+
+        ctx.fillStyle = '#374151'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('循环次数', padding.left + plotW / 2, h - 4);
+        ctx.save(); ctx.translate(14, padding.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.fillText('加载力 (N)', 0, 0); ctx.restore();
+
+        data.forEach(d => {
+            const x = toX(d.x), y = toY(d.y);
+            ctx.beginPath(); ctx.arc(x, y, d.flagged ? 7 : 5, 0, Math.PI * 2);
+            ctx.fillStyle = colorMap[d.result] || '#6b7280'; ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+        });
+
+        const results = [...new Set(data.map(d => d.result))];
+        ctx.font = '12px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+        let legendIdx = 0; const legendX = padding.left + plotW - 10;
+        results.forEach(result => {
+            const legendY = padding.top + 5 + legendIdx * 20;
+            ctx.fillStyle = colorMap[result] || '#6b7280';
+            ctx.fillRect(legendX - 90, legendY, 12, 12);
+            ctx.fillStyle = '#374151';
+            ctx.fillText(labelMap[result] || result, legendX - 95, legendY);
+            legendIdx++;
+        });
+    }
+    resize(); window.addEventListener('resize', resize);
+})();
+</script>
+{% endif %}
+
+{% if rebound_chart_json %}
+<script>
+(function() {
+    const data = {{ rebound_chart_json|safe }};
+    const canvas = document.getElementById('reboundChart');
+    if (!canvas || !data || data.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width - 32; canvas.height = rect.height - 32; draw();
+    }
+
+    function draw() {
+        const w = canvas.width, h = canvas.height;
+        const padding = { top: 30, right: 30, bottom: 50, left: 60 };
+        const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
+        ctx.clearRect(0, 0, w, h);
+
+        const maxX = data.length > 1 ? data.length : 2;
+        const maxY = Math.max(...data.map(d => d.y)) * 1.15;
+        const minX = 0, minY = 0;
+
+        function toX(v) { return padding.left + ((v - minX) / (maxX - minX)) * plotW; }
+        function toY(v) { return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH; }
+
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const yVal = minY + ((maxY - minY) * i / 5), y = toY(yVal);
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(padding.left + plotW, y); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(yVal.toFixed(1) + '%', padding.left - 8, y);
+        }
+        for (let i = 0; i <= Math.min(maxX - 1, 5); i++) {
+            const xVal = minX + ((maxX - minX) * i / Math.max(1, Math.min(maxX - 1, 5)));
+            const x = toX(xVal);
+            ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + plotH); ctx.stroke();
+            ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('#' + (i + 1), x, padding.top + plotH + 6);
+        }
+
+        ctx.strokeStyle = '#374151'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, padding.top + plotH);
+        ctx.lineTo(padding.left + plotW, padding.top + plotH); ctx.stroke();
+
+        ctx.fillStyle = '#374151'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('测试序号', padding.left + plotW / 2, h - 4);
+        ctx.save(); ctx.translate(14, padding.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.fillText('回弹率 (%)', 0, 0); ctx.restore();
+
+        if (data.length > 1) {
+            ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 2; ctx.beginPath();
+            data.forEach((d, i) => { const x = toX(d.x), y = toY(d.y); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+            ctx.stroke();
+        }
+        data.forEach(d => {
+            const x = toX(d.x), y = toY(d.y);
+            ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#7c3aed'; ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillStyle = '#374151'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(d.y.toFixed(1) + '%', x, y - 10);
+        });
+    }
+    resize(); window.addEventListener('resize', resize);
 })();
 </script>
 {% endif %}

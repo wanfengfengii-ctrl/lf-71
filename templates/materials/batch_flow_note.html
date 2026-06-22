@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% block title %}添加流程备注 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>
+        添加流程备注
+        <small style="font-size: 1rem; color: #6b7280; font-weight: normal;">
+            - {{ batch.batch_number }} ({{ batch.material_source }})
+        </small>
+    </h1>
+    <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">
+        返回批次详情
+    </a>
+</div>
+
+<div class="card" style="max-width: 700px;">
+    <div style="padding: 1rem; background: #f0f9ff; border-radius: 8px; margin-bottom: 1.5rem;">
+        <div style="color: #075985; font-weight: 600; margin-bottom: 0.25rem;">
+            批次状态信息
+        </div>
+        <div style="color: #0369a1; font-size: 0.9rem;">
+            当前状态：
+            {% if batch.status == 'active' %}
+                <span class="badge badge-success">正常</span>
+            {% elif batch.status == 'testing' %}
+                <span class="badge badge-info">测试中</span>
+            {% elif batch.status == 'broken' %}
+                <span class="badge badge-danger">已断裂</span>
+            {% elif batch.status == 'review' %}
+                <span class="badge badge-warning">待审核</span>
+            {% elif batch.status == 'archived' %}
+                <span class="badge badge-gray">已归档</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <form method="post" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% with field=form.notes %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">
+                {{ field.label }}<span class="required">*</span>
+            </label>
+            <textarea name="{{ field.name }}"
+                      id="{{ field.id_for_label }}"
+                      class="form-control {% if field.errors %}error{% endif %}"
+                      rows="4"
+                      placeholder="请输入流程备注信息...">{{ field.value|default:'' }}</textarea>
+            {% if field.errors %}
+                {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+            {% endif %}
+        </div>
+        {% endwith %}
+
+        {% with field=form.operator %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <input type="text"
+                   name="{{ field.name }}"
+                   id="{{ field.id_for_label }}"
+                   class="form-control {% if field.errors %}error{% endif %}"
+                   value="{{ field.value|default:'' }}"
+                   placeholder="操作人姓名（可选）">
+            {% if field.errors %}
+                {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+            {% endif %}
+        </div>
+        {% endwith %}
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">添加备注</button>
+            <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

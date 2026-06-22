@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}处理异常数据 - 弓弦材料测试系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>处理异常数据</h1>
+    <a href="{% url 'materials:anomaly_list' %}" class="btn btn-secondary">返回列表</a>
+</div>
+
+<div class="card" style="max-width: 700px;">
+    <div style="margin-bottom: 1.5rem; padding: 1rem; background: #f9fafb; border-radius: 8px;">
+        <div><strong>批次：</strong>{{ anomaly.batch.batch_number }}</div>
+        <div><strong>数据来源：</strong>{{ anomaly.get_source_type_display }}</div>
+        <div>
+            <strong>严重程度：</strong>
+            <span class="badge {% if anomaly.severity == 'low' %}badge-success{% elif anomaly.severity == 'medium' %}badge-warning{% else %}badge-danger{% endif %}">
+                {{ anomaly.get_severity_display }}
+            </span>
+        </div>
+        <div><strong>异常描述：</strong>{{ anomaly.anomaly_description }}</div>
+        <div><strong>发现时间：</strong>{{ anomaly.created_at|date:"Y-m-d H:i" }}</div>
+    </div>
+
+    <form method="post" novalidate>
+        {% csrf_token %}
+
+        {% with field=form.resolution %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">{{ field.label }}<span class="required">*</span></label>
+            <textarea name="{{ field.name }}"
+                      id="{{ field.id_for_label }}"
+                      class="form-control {% if field.errors %}error{% endif %}"
+                      rows="4">{{ field.value|default:'' }}</textarea>
+            {% if field.errors %}
+                {% for error in field.errors %}<div class="error-text">{{ error }}</div>{% endfor %}
+            {% endif %}
+        </div>
+        {% endwith %}
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-success">确认处理</button>
+            <a href="{% url 'materials:anomaly_list' %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
