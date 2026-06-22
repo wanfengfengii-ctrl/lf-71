@@ -658,6 +658,16 @@ class FatigueTest(models.Model):
         verbose_name='测试结果',
         help_text='疲劳测试后的样本状态'
     )
+    abnormal_break = models.BooleanField(
+        default=False,
+        verbose_name='异常断裂',
+        help_text='是否为异常断裂'
+    )
+    break_reason = models.TextField(
+        blank=True,
+        verbose_name='断裂原因',
+        help_text='异常断裂时必须填写原因'
+    )
     elongation_after = models.FloatField(
         null=True,
         blank=True,
@@ -733,6 +743,9 @@ class FatigueTest(models.Model):
             raise ValidationError({'load_ratio': '应力比应在-1到1之间'})
         if self.elongation_after is not None and self.elongation_after < 0:
             raise ValidationError({'elongation_after': '测试后伸长量不能为负数'})
+        if self.abnormal_break:
+            if not self.break_reason or not str(self.break_reason).strip():
+                raise ValidationError({'break_reason': '异常断裂必须填写原因'})
         batch_id = getattr(self, 'batch_id', None)
         if batch_id:
             batch = MaterialBatch.objects.filter(pk=batch_id).first()
@@ -753,9 +766,12 @@ class FatigueTest(models.Model):
                 batch.status = MaterialBatch.STATUS_BROKEN
                 batch.broken_at = timezone.now()
                 batch.save(update_fields=['status', 'broken_at'])
+                flow_notes = f'疲劳测试断裂 - 加载力:{self.load_force}N, 循环次数:{self.cycle_count}次'
+                if self.abnormal_break:
+                    flow_notes += f'【异常断裂】{self.break_reason}'
                 batch.record_flow_action(
                     action=BreakageFlowRecord.ACTION_DETECTED,
-                    notes=f'疲劳测试断裂 - 加载力:{self.load_force}N, 循环次数:{self.cycle_count}次',
+                    notes=flow_notes,
                     source_test_id=self.pk,
                     source_test_type='fatigue',
                 )

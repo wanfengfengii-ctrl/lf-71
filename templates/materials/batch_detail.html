@@ -478,7 +478,10 @@
                         {% elif ft.result == 'major_damage' %}
                             <span class="badge" style="background: #ffedd5; color: #9a3412;">严重损伤</span>
                         {% elif ft.result == 'broken' %}
-                            <span class="badge badge-danger">断裂</span>
+                            <span class="badge badge-danger">
+                                断裂
+                                {% if ft.abnormal_break %}(异常){% endif %}
+                            </span>
                         {% endif %}
                     </td>
                     <td>
@@ -495,6 +498,13 @@
                         </div>
                     </td>
                 </tr>
+                {% if ft.break_reason %}
+                <tr>
+                    <td colspan="11" style="background: #fef9c3; color: #854d0e; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <strong>断裂原因：</strong>{{ ft.break_reason }}
+                    </td>
+                </tr>
+                {% endif %}
                 {% if ft.flag_reason %}
                 <tr>
                     <td colspan="11" style="background: #fef3c7; color: #92400e; padding: 0.5rem 1rem; font-size: 0.85rem;">
@@ -712,6 +722,30 @@
     const data = {{ stress_strain_json|safe }};
     const canvas = document.getElementById('stressStrainChart');
     if (!canvas || !data || data.length === 0) return;
+    const validData = data.filter(d => d.x != null && d.y != null && d.x > 0 && d.y > 0);
+    if (validData.length === 0) {
+        canvas.innerHTML = '';
+        const ctx = canvas.getContext('2d');
+        function resize() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width - 32;
+            canvas.height = rect.height - 32;
+            drawEmpty();
+        }
+        function drawEmpty() {
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('暂无有效的应力-应变数据', w / 2, h / 2);
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = '#d1d5db';
+            ctx.fillText('（需要伸长量和应力均大于0的测试记录）', w / 2, h / 2 + 20);
+        }
+        resize(); window.addEventListener('resize', resize);
+        return;
+    }
     const ctx = canvas.getContext('2d');
 
     function resize() {
@@ -727,12 +761,15 @@
         const plotW = w - padding.left - padding.right, plotH = h - padding.top - padding.bottom;
         ctx.clearRect(0, 0, w, h);
 
-        const maxX = Math.max(...data.map(d => d.x)) * 1.1;
-        const maxY = Math.max(...data.map(d => d.y)) * 1.1;
+        const maxX = Math.max(...validData.map(d => d.x)) * 1.1;
+        const maxY = Math.max(...validData.map(d => d.y)) * 1.1;
         const minX = 0, minY = 0;
 
-        function toX(v) { return padding.left + ((v - minX) / (maxX - minX)) * plotW; }
-        function toY(v) { return padding.top + plotH - ((v - minY) / (maxY - minY)) * plotH; }
+        const rangeX = maxX - minX || 1;
+        const rangeY = maxY - minY || 1;
+
+        function toX(v) { return padding.left + ((v - minX) / rangeX) * plotW; }
+        function toY(v) { return padding.top + plotH - ((v - minY) / rangeY) * plotH; }
 
         ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
         for (let i = 0; i <= 5; i++) {
@@ -757,12 +794,12 @@
         ctx.save(); ctx.translate(14, padding.top + plotH / 2); ctx.rotate(-Math.PI / 2);
         ctx.textAlign = 'center'; ctx.fillText('应力 (MPa)', 0, 0); ctx.restore();
 
-        if (data.length > 1) {
+        if (validData.length > 1) {
             ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath();
-            data.forEach((d, i) => { const x = toX(d.x), y = toY(d.y); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+            validData.forEach((d, i) => { const x = toX(d.x), y = toY(d.y); if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
             ctx.stroke();
         }
-        data.forEach(d => {
+        validData.forEach(d => {
             const x = toX(d.x), y = toY(d.y);
             ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
             ctx.fillStyle = d.flagged && !d.broken ? '#f59e0b' : d.broken ? '#dc2626' : '#16a34a';

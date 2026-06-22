@@ -164,7 +164,8 @@ class FatigueTestForm(forms.ModelForm):
         model = FatigueTest
         fields = [
             'load_force', 'cycle_count', 'frequency', 'load_ratio',
-            'result', 'elongation_after', 'is_flagged', 'flag_reason',
+            'result', 'abnormal_break', 'break_reason',
+            'elongation_after', 'is_flagged', 'flag_reason',
             'test_time', 'notes'
         ]
         widgets = {
@@ -172,6 +173,7 @@ class FatigueTestForm(forms.ModelForm):
                 attrs={'type': 'datetime-local'},
                 format='%Y-%m-%dT%H:%M'
             ),
+            'break_reason': forms.Textarea(attrs={'rows': 2}),
             'flag_reason': forms.Textarea(attrs={'rows': 2}),
             'notes': forms.Textarea(attrs={'rows': 2}),
         }
@@ -215,6 +217,16 @@ class FatigueTestForm(forms.ModelForm):
         cleaned_data = super().clean()
         is_flagged = cleaned_data.get('is_flagged')
         flag_reason = cleaned_data.get('flag_reason')
+        abnormal_break = cleaned_data.get('abnormal_break')
+        break_reason = cleaned_data.get('break_reason')
+        result = cleaned_data.get('result')
+
+        if abnormal_break:
+            if not break_reason or not str(break_reason).strip():
+                self.add_error('break_reason', '异常断裂必须填写原因')
+
+        if result != FatigueTest.RESULT_BROKEN and abnormal_break:
+            self.add_error('abnormal_break', '只有测试结果为"断裂"时才能标记异常断裂')
 
         if is_flagged:
             if not flag_reason or not str(flag_reason).strip():
