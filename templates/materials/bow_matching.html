@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}弓型匹配 - {{ batch.batch_number }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>🏹 适用弓型匹配分析</h1>
+        <p style="color:#6b7280;margin-top:0.25rem;">
+            材料批次：<a href="{% url 'materials:batch_detail' batch.pk %}" style="color:#2563eb;">{{ batch.batch_number }}</a>
+            - {{ batch.material_source }}
+        </p>
+    </div>
+    <div class="actions-row">
+        <a href="{% url 'materials:batch_detail' batch.pk %}" class="btn btn-secondary">← 返回批次详情</a>
+        <a href="{% url 'materials:batch_recommendations' batch.pk %}" class="btn btn-success">🔍 相似材料</a>
+        <a href="{% url 'materials:life_prediction_dashboard' %}" class="btn btn-primary">📊 仪表板</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">材料直径</div>
+        <div class="stat-value">{{ batch.diameter }}<span style="font-size:1rem;color:#6b7280;"> mm</span></div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">抗拉强度</div>
+        <div class="stat-value">
+            {% if batch.tensile_strength %}
+                {{ batch.tensile_strength }}<span style="font-size:1rem;color:#6b7280;"> MPa</span>
+            {% else %}
+                <span style="font-size:1rem;color:#9ca3af;">--</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">断裂循环次数</div>
+        <div class="stat-value">
+            {% if batch.fatigue_cycles_to_failure %}
+                {{ batch.fatigue_cycles_to_failure }}<span style="font-size:1rem;color:#6b7280;"> 次</span>
+            {% else %}
+                <span style="font-size:1rem;color:#9ca3af;">--</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">最大拉力</div>
+        <div class="stat-value">
+            {% if batch.max_tension_force %}
+                {{ batch.max_tension_force }}<span style="font-size:1rem;color:#6b7280;"> N</span>
+            {% else %}
+                <span style="font-size:1rem;color:#9ca3af;">--</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">📊 弓型匹配度排行</div>
+    <div class="chart-container" id="matchChart"></div>
+</div>
+
+<div class="card">
+    <div class="card-title">🎯 详细匹配结果</div>
+    {% if matchings_detail %}
+    <table>
+        <thead>
+            <tr>
+                <th>排名</th>
+                <th>弓型名称</th>
+                <th>类别</th>
+                <th>拉力范围(lbs)</th>
+                <th>推荐直径(mm)</th>
+                <th>匹配度评分</th>
+                <th>匹配等级</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in matchings_detail %}
+            {% with m=item.matching %}
+            <tr>
+                <td><strong>#{{ forloop.counter }}</strong></td>
+                <td><strong>{{ m.bow_type.name }}</strong></td>
+                <td>{{ m.bow_type.get_category_display }}</td>
+                <td>{{ m.bow_type.min_draw_weight }} - {{ m.bow_type.max_draw_weight }}</td>
+                <td>{{ m.bow_type.recommended_diameter_min }} - {{ m.bow_type.recommended_diameter_max }}</td>
+                <td style="font-weight:700;font-size:1.05rem;">{{ m.match_score }}</td>
+                <td><span class="badge {{ m.match_color_class }}">{{ m.get_match_level_display }}</span></td>
+            </tr>
+            {% if item.criteria %}
+            <tr style="background:#f9fafb;">
+                <td colspan="7" style="padding:1rem;">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;">
+                        {% for c in item.criteria %}
+                        <div style="padding:0.75rem;border-radius:8px;border:1px solid #e5e7eb;background:#fff;">
+                            <div style="font-weight:600;color:#374151;margin-bottom:0.25rem;">{{ c.key }}</div>
+                            <div style="font-size:0.85rem;color:#6b7280;margin-bottom:0.35rem;">{{ c.message }}</div>
+                            <div style="display:flex;align-items:center;gap:0.5rem;">
+                                <div style="flex:1;height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;">
+                                    <div style="height:100%;width:{{ c.score }}%;background:{% if c.result == 'pass' %}#16a34a{% elif c.result == 'partial' %}#f59e0b{% else %}#dc2626{% endif %};"></div>
+                                </div>
+                                <span style="font-size:0.8rem;font-weight:600;color:#374151;">{{ c.score }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% if m.notes %}
+                    <div style="margin-top:0.75rem;padding:0.6rem 0.85rem;background:#fffbeb;border-radius:6px;border:1px solid #fde68a;font-size:0.85rem;color:#92400e;">
+                        <strong>匹配说明：</strong>{{ m.notes }}
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            {% endwith %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无匹配结果</p>
+        <p style="margin-top:0.5rem;font-size:0.9rem;color:#9ca3af;">请先配置弓型参数</p>
+    </div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+    const chartData = {{ chart_data_json|safe }};
+    const chart = echarts.init(document.getElementById('matchChart'));
+    const levelColors = {
+        'excellent': '#16a34a',
+        'good': '#2563eb',
+        'fair': '#f59e0b',
+        'poor': '#dc2626',
+        '极佳匹配': '#16a34a',
+        '良好匹配': '#2563eb',
+        '一般匹配': '#f59e0b',
+        '不推荐': '#dc2626',
+    };
+    chart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            formatter: function(params) {
+                const d = params[0];
+                const item = chartData[d.dataIndex];
+                return `${item.name} (${item.category})<br/>匹配度: <b>${d.value}</b><br/>等级: <b>${item.level}</b>`;
+            }
+        },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: chartData.map(d => d.name), axisLabel: { rotate: 25, fontSize: 11 } },
+        yAxis: { type: 'value', max: 100, name: '匹配度评分' },
+        series: [{
+            type: 'bar',
+            data: chartData.map(d => ({
+                value: d.score,
+                itemStyle: { color: levelColors[d.level] || '#6b728a', borderRadius: [4, 4, 0, 0] }
+            })),
+            barWidth: '50%',
+            label: { show: true, position: 'top', fontWeight: 600 },
+            markLine: {
+                silent: true,
+                data: [
+                    { yAxis: 85, lineStyle: { color: '#16a34a', type: 'dashed' }, label: { formatter: '极佳 ≥85', color: '#16a34a' } },
+                    { yAxis: 70, lineStyle: { color: '#2563eb', type: 'dashed' }, label: { formatter: '良好 ≥70', color: '#2563eb' } },
+                    { yAxis: 50, lineStyle: { color: '#f59e0b', type: 'dashed' }, label: { formatter: '一般 ≥50', color: '#f59e0b' } },
+                ]
+            }
+        }]
+    });
+    window.addEventListener('resize', () => chart.resize());
+</script>
+{% endblock %}

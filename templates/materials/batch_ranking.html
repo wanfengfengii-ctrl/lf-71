@@ -1,0 +1,208 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}批次排行 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>🏆 历史批次表现排行</h1>
+        <p style="color:#6b7280;margin-top:0.25rem;">综合多维度评估，展示各批次材料表现排名</p>
+    </div>
+    <div class="actions-row">
+        <form method="post" action="{% url 'materials:run_batch_rankings' %}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">🔄 更新全部排行榜</button>
+        </form>
+        <a href="?refresh=1&type={{ ranking_type }}" class="btn btn-success">📈 刷新当前排行</a>
+    </div>
+</div>
+
+<div style="margin-bottom:1.5rem;">
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        {% for rt_val, rt_label in ranking_types %}
+        <a href="?type={{ rt_val }}"
+           class="btn btn-sm {% if rt_val == ranking_type %}btn-primary{% else %}btn-secondary{% endif %}"
+           style="text-decoration:none;">
+            {{ rt_label }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">📊 当前排行可视化</div>
+        <div class="chart-container" id="rankChart"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">📈 各维度 TOP 5 对比</div>
+        <div class="chart-container" id="compareChart"></div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">📋 完整榜单</div>
+    {% if current_rankings %}
+    <table>
+        <thead>
+            <tr>
+                <th style="width:80px;">排名</th>
+                <th>批次编号</th>
+                <th>材料来源</th>
+                <th>直径(mm)</th>
+                <th>状态</th>
+                <th>评分</th>
+                <th>寿命评分</th>
+                <th>风险等级</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rank in current_rankings %}
+            <tr>
+                <td>
+                    <div style="display:flex;align-items:center;justify-content:center;">
+                        {% if rank.rank == 1 %}
+                        <span style="font-size:1.5rem;">🥇</span>
+                        {% elif rank.rank == 2 %}
+                        <span style="font-size:1.5rem;">🥈</span>
+                        {% elif rank.rank == 3 %}
+                        <span style="font-size:1.5rem;">🥉</span>
+                        {% else %}
+                        <span style="font-size:1.1rem;font-weight:700;color:#374151;">#{{ rank.rank }}</span>
+                        {% endif %}
+                    </div>
+                </td>
+                <td><strong style="color:#1e3a5f;">{{ rank.batch.batch_number }}</strong></td>
+                <td>{{ rank.batch.material_source }}</td>
+                <td>{{ rank.batch.diameter }}</td>
+                <td>
+                    <span class="badge {% if rank.batch.status == 'active' %}badge-success{% elif rank.batch.status == 'broken' %}badge-danger{% elif rank.batch.status == 'testing' %}badge-info{% else %}badge-gray{% endif %}">
+                        {{ rank.batch.get_status_display }}
+                    </span>
+                </td>
+                <td style="font-size:1.1rem;font-weight:700;color:#1e3a5f;">{{ rank.score }}</td>
+                <td>
+                    {% with rank.batch.life_predictions.all as preds %}
+                        {% for p in preds %}
+                            {% if p.is_latest %}
+                                {{ p.life_score }}
+                            {% endif %}
+                        {% empty %}
+                            <span style="color:#9ca3af;">--</span>
+                        {% endfor %}
+                    {% endwith %}
+                </td>
+                <td>
+                    {% with rank.batch.life_predictions.all as preds %}
+                        {% for p in preds %}
+                            {% if p.is_latest %}
+                                <span class="badge {{ p.risk_color_class }}">{{ p.get_risk_level_display }}</span>
+                            {% endif %}
+                        {% empty %}
+                            <span style="color:#9ca3af;">--</span>
+                        {% endfor %}
+                    {% endwith %}
+                </td>
+                <td>
+                    <div class="actions-row">
+                        <a href="{% url 'materials:batch_detail' rank.batch.pk %}" class="btn btn-sm btn-secondary">详情</a>
+                        <form method="post" action="{% url 'materials:run_life_prediction' rank.batch.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-primary">预测</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无排行数据</p>
+        <p style="margin-top:0.5rem;font-size:0.9rem;color:#9ca3af;">请先点击"更新全部排行榜"</p>
+    </div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+    const chartData = {{ chart_data_json|safe }};
+    const rankChart = echarts.init(document.getElementById('rankChart'));
+    rankChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            formatter: function(params) {
+                const d = params[0];
+                const item = chartData[d.dataIndex];
+                return '# ' + item.rank + ' ' + item.name + '<br/>来源: ' + item.source + '<br/>评分: <b>' + item.score + '</b>';
+            }
+        },
+        grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
+        xAxis: { type: 'category', data: chartData.map(function(d) { return d.name; }), axisLabel: { rotate: 30, fontSize: 10 } },
+        yAxis: { type: 'value', name: '评分' },
+        series: [{
+            type: 'bar',
+            data: chartData.map(function(d, i) {
+                return {
+                    value: d.score,
+                    itemStyle: {
+                        color: i === 0 ? '#fbbf24' : i === 1 ? '#9ca3af' : i === 2 ? '#d97706' : '#2563eb',
+                        borderRadius: [4, 4, 0, 0]
+                    }
+                };
+            }),
+            barWidth: '55%',
+            label: { show: true, position: 'top', fontWeight: 600, fontSize: 10 },
+        }]
+    });
+
+    const compareData = {{ compare_chart_json|safe }};
+    const compareChart = echarts.init(document.getElementById('compareChart'));
+    const compareSeries = [];
+    const legendData = [];
+    const colors = ['#fbbf24', '#2563eb', '#16a34a', '#9333ea', '#dc2626'];
+    var colorIdx = 0;
+    var firstKey = null;
+    var xAxisData = [];
+
+    for (var key in compareData) {
+        if (compareData.hasOwnProperty(key)) {
+            var val = compareData[key];
+            if (!firstKey) {
+                firstKey = key;
+                xAxisData = val.data.map(function(d) { return d.name; });
+            }
+            legendData.push(val.label);
+            compareSeries.push({
+                name: val.label,
+                type: 'bar',
+                data: val.data.map(function(d) { return d.score; }),
+                itemStyle: { color: colors[colorIdx % colors.length], borderRadius: [3, 3, 0, 0] },
+                barWidth: '18%',
+            });
+            colorIdx++;
+        }
+    }
+
+    compareChart.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { top: 0, data: legendData },
+        grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
+        xAxis: {
+            type: 'category',
+            data: xAxisData,
+            axisLabel: { rotate: 25, fontSize: 10 }
+        },
+        yAxis: { type: 'value', name: '评分' },
+        series: compareSeries,
+    });
+
+    window.addEventListener('resize', function() {
+        rankChart.resize();
+        compareChart.resize();
+    });
+</script>
+{% endblock %}

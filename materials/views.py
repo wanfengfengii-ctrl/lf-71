@@ -14,6 +14,8 @@ from django.contrib import messages
 from .models import (
     MaterialBatch, TensionTest, FatigueTest, DataAnomalyLog,
     MaterialProcessParam, BreakageFlowRecord, StatisticalSnapshot,
+    BowType, LifePrediction, MaterialRecommendation,
+    BowTypeMatching, BatchRanking,
 )
 from .forms import (
     MaterialBatchForm, TensionTestForm, FatigueTestForm,
@@ -23,6 +25,7 @@ from .forms import (
 from .utils import (
     AnomalyDetector, StatisticsAnalyzer, ReboundRateCalculator,
     BreakFlowManager, SnapshotGenerator,
+    LifePredictor, MaterialRecommender, BowTypeMatcher, BatchRanker,
 )
 
 
@@ -818,3 +821,569 @@ class CalculateReboundAPIView(View):
             'success': True,
             'rebound_rate': result,
         })
+
+
+class LifePredictionDashboardView(View):
+    def get(self, request):
+        batches = MaterialBatch.objects.all()
+        total_batches = batches.count()
+
+        predictions = LifePrediction.objects.filter(is_latest=True)
+        pred_count = predictions.count()
+
+        if predictions.exists():
+            avg_life = round(
+                sum(p.life_score for p in predictions) / pred_count, 1
+            )
+            avg_durability = round(
+                sum(p.durability_score for p in predictions) / pred_count, 1
+            )
+            avg_stability = round(
+                sum(p.stability_score for p in predictions) / pred_count, 1
+            )
+            avg_risk = round(
+                sum(p.risk_score for p in predictions) / pred_count, 1
+            )
+        else:
+            avg_life = avg_durability = avg_stability = avg_risk = 0
+
+        risk_dist = {}
+        for val, label in LifePrediction.RISK_LEVEL_CHOICES:
+            risk_dist[val] = {
+                'label': label,
+                'count': predictions.filter(risk_level=val).count(),
+            }
+
+        high_risk = predictions.filter(
+            risk_level__in=[LifePrediction.RISK_LEVEL_HIGH, LifePrediction.RISK_LEVEL_CRITICAL]
+        ).select_related('batch').order_by('-risk_score')[:10]
+
+        ranker = BatchRanker()
+        try:
+            top_overall = ranker.get_rankings(BatchRanking.RANKING_TYPE_OVERALL, limit=5)
+        except Exception:
+            top_overall = []
+
+        recent_predictions = predictions.select_related('batch').order_by('-predicted_at')[:10]
+
+        bow_types = BowType.objects.all()
+
+        context = {
+            'total_batches': total_batches,
+            'pred_count': pred_count,
+            'avg_life': avg_life,
+            'avg_durability': avg_durability,
+            'avg_stability': avg_stability,
+            'avg_risk': avg_risk,
+            'risk_dist_json': json.dumps(risk_dist, ensure_ascii=False),
+            'high_risk_list': high_risk,
+            'top_overall': top_overall,
+            'recent_predictions': recent_predictions,
+            'bow_types': bow_types,
+            'all_batches': batches,
+            'ranking_types': BatchRanking.RANKING_TYPE_CHOICES,
+        }
+        return render(request, 'materials/life_prediction_dashboard.html', context)
+
+
+class RunLifePredictionView(View):
+    def post(self, request, pk):
+        batch = get_object_or_404(MaterialBatch, pk=pk)
+        try:
+            predictor = LifePredictor(batch)
+            result = predictor.predict()
+            pred = result['prediction']
+            messages.success(request, f'寿命预测完成，综合评分{pred.life_score}分，风险等级：{pred.get_risk_level_display()}')
+        except Exception as e:
+            messages.error(request, f'预测失败：{str(e)}')
+            return redirect('materials:batch_detail', pk=pk)
+        return redirect('materials:life_prediction_detail', pk=pred.pk)
+
+
+class RunAllLifePredictionsView(View):
+    def post(self, request):
+        batches = MaterialBatch.objects.all()
+        success_count = 0
+        fail_count = 0
+        for batch in batches:
+            try:
+                predictor = LifePredictor(batch)
+                predictor.predict()
+                success_count += 1
+            except Exception:
+                fail_count += 1
+        try:
+            ranker = BatchRanker()
+            ranker.generate_rankings()
+        except Exception:
+            pass
+        messages.success(request, f'批量预测完成：成功{success_count}个，失败{fail_count}个')
+        return redirect('materials:life_prediction_dashboard')
+
+
+class LifePredictionDetailView(View):
+    def get(self, request, pk):
+        prediction = get_object_or_404(LifePrediction.objects.select_related('batch'), pk=pk)
+        batch = prediction.batch
+
+        history = LifePrediction.objects.filter(
+            batch=batch
+        ).order_by('-predicted_at')[:20]
+
+        history_chart = []
+        for p in history:
+            history_chart.append({
+                'x': p.predicted_at.strftime('%Y-%m-%d %H:%M'),
+                'life_score': float(p.life_score),
+                'durability': float(p.durability_score),
+                'stability': float(p.stability_score),
+                'risk_score': float(p.risk_score),
+            })
+        history_chart.reverse()
+
+        radar_data = {
+            'labels': ['耐久性', '稳定性', '抗拉强度', '疲劳寿命', '回弹性能', '安全裕度'],
+            'values': [
+                float(prediction.durability_score),
+                float(prediction.stability_score),
+                min((batch.tensile_strength or 0) / 10, 100),
+                min((batch.fatigue_cycles_to_failure or 0) / 100, 100),
+                (batch.avg_rebound_rate or 0),
+                100 - float(prediction.risk_score),
+            ],
+        }
+
+        try:
+            matcher = BowTypeMatcher(batch)
+            bow_matchings = matcher.match_all_bow_types()[:5]
+        except Exception:
+            bow_matchings = BowTypeMatching.objects.filter(
+                batch=batch
+            ).select_related('bow_type').order_by('-match_score')[:5]
+
+        try:
+            recommender = MaterialRecommender(batch)
+            rec_results = recommender.generate_recommendations(top_n=5)
+            recommendations = [r['recommendation'] for r in rec_results]
+        except Exception:
+            recommendations = MaterialRecommendation.objects.filter(
+                source_batch=batch
+            ).select_related('recommended_batch').order_by('-overall_score')[:5]
+
+        bow_chart_data = []
+        for m in bow_matchings:
+            bow_chart_data.append({
+                'name': m.bow_type.name,
+                'category': m.bow_type.get_category_display(),
+                'score': float(m.match_score),
+                'level': m.get_match_level_display(),
+            })
+
+        factor_breakdown = []
+        factor_labels = ['寿命评分', '耐久性', '稳定性', '风险惩罚']
+        factor_values = [
+            float(prediction.life_score),
+            float(prediction.durability_score),
+            float(prediction.stability_score),
+            float(prediction.risk_score),
+        ]
+        factor_colors = ['#2563eb', '#16a34a', '#9333ea', '#dc2626']
+        for label, val, color in zip(factor_labels, factor_values, factor_colors):
+            factor_breakdown.append({
+                'label': label,
+                'value': val,
+                'color': color,
+            })
+
+        context = {
+            'prediction': prediction,
+            'batch': batch,
+            'history': history,
+            'history_chart_json': json.dumps(history_chart, ensure_ascii=False),
+            'radar_data_json': json.dumps(radar_data, ensure_ascii=False),
+            'bow_matchings': bow_matchings,
+            'recommendations': recommendations,
+            'bow_chart_json': json.dumps(bow_chart_data, ensure_ascii=False),
+            'factor_breakdown_json': json.dumps(factor_breakdown, ensure_ascii=False),
+        }
+        return render(request, 'materials/life_prediction_detail.html', context)
+
+
+class BatchRecommendationsView(View):
+    def get(self, request, pk):
+        batch = get_object_or_404(MaterialBatch, pk=pk)
+        try:
+            recommender = MaterialRecommender(batch)
+            results = recommender.generate_recommendations(top_n=10)
+        except Exception as e:
+            messages.error(request, f'推荐生成失败：{str(e)}')
+            results = []
+
+        rec_list = []
+        chart_data = []
+        for r in results:
+            rec = r['recommendation']
+            gains = r['gains']
+            rec_list.append({
+                'recommendation': rec,
+                'gains': gains,
+                'target_prediction': r['target_prediction'],
+            })
+            chart_data.append({
+                'name': rec.recommended_batch.batch_number,
+                'similarity': float(rec.similarity_score),
+                'performance': float(max(-50, min(rec.performance_score, 50)) + 50),
+                'overall': float(rec.overall_score),
+            })
+
+        context = {
+            'source_batch': batch,
+            'recommendations': rec_list,
+            'chart_data_json': json.dumps(chart_data, ensure_ascii=False),
+        }
+        return render(request, 'materials/material_recommendations.html', context)
+
+
+class BatchBowMatchingView(View):
+    def get(self, request, pk):
+        batch = get_object_or_404(MaterialBatch, pk=pk)
+        try:
+            matcher = BowTypeMatcher(batch)
+            matchings = matcher.match_all_bow_types()
+        except Exception as e:
+            messages.error(request, f'匹配计算失败：{str(e)}')
+            matchings = BowTypeMatching.objects.filter(
+                batch=batch
+            ).select_related('bow_type').order_by('-match_score')
+
+        detail_data = []
+        for m in matchings:
+            criteria = m.criteria_results or {}
+            criteria_list = []
+            for k, v in criteria.items():
+                label_map = {
+                    'diameter': '直径匹配',
+                    'tensile_strength': '抗拉强度',
+                    'fatigue_cycles': '疲劳循环',
+                    'life_score': '寿命评分',
+                    'safety_factor': '安全系数',
+                }
+                criteria_list.append({
+                    'key': label_map.get(k, k),
+                    'result': v.get('result', ''),
+                    'score': v.get('score', 0),
+                    'message': v.get('message', ''),
+                })
+            detail_data.append({
+                'matching': m,
+                'criteria': criteria_list,
+            })
+
+        chart_data = []
+        for m in matchings:
+            chart_data.append({
+                'name': m.bow_type.name,
+                'category': m.bow_type.get_category_display(),
+                'score': float(m.match_score),
+                'level': m.match_level,
+            })
+
+        context = {
+            'batch': batch,
+            'matchings_detail': detail_data,
+            'chart_data_json': json.dumps(chart_data, ensure_ascii=False),
+        }
+        return render(request, 'materials/bow_matching.html', context)
+
+
+class BatchRankingView(View):
+    def get(self, request):
+        ranking_type = request.GET.get('type', BatchRanking.RANKING_TYPE_OVERALL)
+        ranker = BatchRanker()
+
+        try:
+            if request.GET.get('refresh') == '1':
+                ranker.generate_rankings()
+                messages.success(request, '排行榜已更新')
+        except Exception as e:
+            messages.warning(request, f'排行榜更新异常：{str(e)}')
+
+        rankings_by_type = {}
+        for rt_val, rt_label in BatchRanking.RANKING_TYPE_CHOICES:
+            rankings_by_type[rt_val] = ranker.get_rankings(rt_val, limit=20)
+
+        current_rankings = rankings_by_type.get(ranking_type, [])
+
+        chart_data = []
+        for r in current_rankings:
+            chart_data.append({
+                'rank': r.rank,
+                'name': r.batch.batch_number,
+                'score': float(r.score),
+                'source': r.batch.material_source,
+                'pk': r.batch.pk,
+            })
+
+        compare_chart = {}
+        for rt_val, rt_label in BatchRanking.RANKING_TYPE_CHOICES:
+            rs = rankings_by_type[rt_val][:5]
+            compare_chart[rt_val] = {
+                'label': rt_label,
+                'data': [
+                    {'name': r.batch.batch_number, 'score': float(r.score)}
+                    for r in rs
+                ]
+            }
+
+        context = {
+            'ranking_type': ranking_type,
+            'ranking_types': BatchRanking.RANKING_TYPE_CHOICES,
+            'current_rankings': current_rankings,
+            'rankings_by_type': rankings_by_type,
+            'chart_data_json': json.dumps(chart_data, ensure_ascii=False),
+            'compare_chart_json': json.dumps(compare_chart, ensure_ascii=False),
+        }
+        return render(request, 'materials/batch_ranking.html', context)
+
+
+class RunBatchRankingsView(View):
+    def post(self, request):
+        try:
+            ranker = BatchRanker()
+            ranker.generate_rankings()
+            messages.success(request, '全部排行榜更新成功')
+        except Exception as e:
+            messages.error(request, f'排行榜生成失败：{str(e)}')
+        return redirect('materials:batch_ranking')
+
+
+class ApiLifePredictionView(View):
+    def post(self, request, pk):
+        batch = get_object_or_404(MaterialBatch, pk=pk)
+        try:
+            predictor = LifePredictor(batch)
+            result = predictor.predict()
+            pred = result['prediction']
+            return JsonResponse({
+                'success': True,
+                'data': {
+                    'id': pred.pk,
+                    'life_score': pred.life_score,
+                    'durability_score': pred.durability_score,
+                    'stability_score': pred.stability_score,
+                    'risk_level': pred.risk_level,
+                    'risk_level_display': pred.get_risk_level_display(),
+                    'risk_score': pred.risk_score,
+                    'predicted_cycles': pred.predicted_cycles_to_failure,
+                    'predicted_hours': pred.predicted_lifetime_hours,
+                    'key_factors': pred.key_factors,
+                    'warning_signs': pred.warning_signs,
+                    'recommendations': pred.recommendations,
+                },
+                'details': {
+                    'durability': result.get('durability_details', {}),
+                    'stability': result.get('stability_details', {}),
+                    'anomaly': result.get('anomaly_details', {}),
+                },
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiBatchRecommendationsView(View):
+    def get(self, request, pk):
+        batch = get_object_or_404(MaterialBatch, pk=pk)
+        try:
+            top_n = int(request.GET.get('top', 5))
+            recommender = MaterialRecommender(batch)
+            results = recommender.generate_recommendations(top_n=top_n)
+            data = []
+            for r in results:
+                rec = r['recommendation']
+                tp = r['target_prediction']
+                data.append({
+                    'id': rec.pk,
+                    'recommended_batch': {
+                        'id': rec.recommended_batch.pk,
+                        'batch_number': rec.recommended_batch.batch_number,
+                        'source': rec.recommended_batch.material_source,
+                        'diameter': rec.recommended_batch.diameter,
+                        'status': rec.recommended_batch.get_status_display(),
+                    },
+                    'similarity_score': rec.similarity_score,
+                    'performance_score': rec.performance_score,
+                    'overall_score': rec.overall_score,
+                    'similarity_factors': rec.similarity_factors,
+                    'advantages': rec.advantages,
+                    'caveats': rec.caveats,
+                    'gains': r['gains'],
+                    'target_life_score': tp.life_score,
+                    'target_risk_level': tp.get_risk_level_display(),
+                })
+            return JsonResponse({
+                'success': True,
+                'source_batch': {
+                    'id': batch.pk,
+                    'batch_number': batch.batch_number,
+                },
+                'recommendations': data,
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiBowMatchingView(View):
+    def get(self, request, pk):
+        batch = get_object_or_404(MaterialBatch, pk=pk)
+        try:
+            matcher = BowTypeMatcher(batch)
+            matchings = matcher.match_all_bow_types()
+            data = []
+            for m in matchings:
+                data.append({
+                    'id': m.pk,
+                    'bow_type': {
+                        'id': m.bow_type.pk,
+                        'name': m.bow_type.name,
+                        'category': m.bow_type.get_category_display(),
+                    },
+                    'match_level': m.match_level,
+                    'match_level_display': m.get_match_level_display(),
+                    'match_score': m.match_score,
+                    'criteria_results': m.criteria_results,
+                    'notes': m.notes,
+                })
+            return JsonResponse({
+                'success': True,
+                'batch': {
+                    'id': batch.pk,
+                    'batch_number': batch.batch_number,
+                },
+                'matchings': data,
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiBatchRankingView(View):
+    def get(self, request):
+        try:
+            ranking_type = request.GET.get('type', BatchRanking.RANKING_TYPE_OVERALL)
+            limit = int(request.GET.get('limit', 20))
+            ranker = BatchRanker()
+            rankings = ranker.get_rankings(ranking_type, limit=limit)
+            data = []
+            for r in rankings:
+                pred = LifePrediction.objects.filter(batch=r.batch, is_latest=True).first()
+                item = {
+                    'rank': r.rank,
+                    'score': r.score,
+                    'batch': {
+                        'id': r.batch.pk,
+                        'batch_number': r.batch.batch_number,
+                        'source': r.batch.material_source,
+                        'diameter': r.batch.diameter,
+                        'status': r.batch.get_status_display(),
+                    },
+                }
+                if pred:
+                    item['life_score'] = pred.life_score
+                    item['risk_level'] = pred.get_risk_level_display()
+                data.append(item)
+            return JsonResponse({
+                'success': True,
+                'ranking_type': ranking_type,
+                'ranking_type_display': dict(BatchRanking.RANKING_TYPE_CHOICES).get(ranking_type, ''),
+                'rankings': data,
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiPredictionVisualizationView(View):
+    def get(self, request, pk):
+        prediction = get_object_or_404(LifePrediction.objects.select_related('batch'), pk=pk)
+        batch = prediction.batch
+
+        history = LifePrediction.objects.filter(batch=batch).order_by('predicted_at')
+        trend_data = []
+        for p in history:
+            trend_data.append({
+                'time': p.predicted_at.strftime('%Y-%m-%d %H:%M'),
+                'life_score': float(p.life_score),
+                'durability': float(p.durability_score),
+                'stability': float(p.stability_score),
+                'risk_score': float(p.risk_score),
+            })
+
+        radar_data = {
+            'labels': ['耐久性', '稳定性', '抗拉强度', '疲劳寿命', '回弹性能', '安全裕度'],
+            'values': [
+                float(prediction.durability_score),
+                float(prediction.stability_score),
+                min((batch.tensile_strength or 0) / 10, 100),
+                min((batch.fatigue_cycles_to_failure or 0) / 100, 100),
+                (batch.avg_rebound_rate or 0),
+                max(0, 100 - float(prediction.risk_score)),
+            ],
+        }
+
+        gauge_data = {
+            'life_score': {
+                'value': float(prediction.life_score),
+                'label': '寿命评分',
+                'thresholds': [30, 50, 70, 100],
+            },
+            'risk_score': {
+                'value': float(prediction.risk_score),
+                'label': '风险指数',
+                'thresholds': [25, 50, 75, 100],
+            },
+        }
+
+        batch_tests = batch.tension_tests.filter(is_flagged=False).order_by('test_time')
+        fatigue_tests = batch.fatigue_tests.filter(is_flagged=False).order_by('test_time')
+
+        tension_trend = []
+        for t in batch_tests:
+            tension_trend.append({
+                'time': t.test_time.strftime('%Y-%m-%d %H:%M'),
+                'force': float(t.tension_force),
+                'elongation': float(t.elongation),
+                'rebound': float(t.rebound_rate) if t.rebound_rate else None,
+                'broken': t.is_broken,
+            })
+
+        fatigue_sncurve = []
+        for ft in fatigue_tests:
+            fatigue_sncurve.append({
+                'cycles': ft.cycle_count,
+                'load': float(ft.load_force),
+                'result': ft.result,
+                'result_display': ft.get_result_display(),
+            })
+
+        return JsonResponse({
+            'success': True,
+            'batch': {
+                'id': batch.pk,
+                'batch_number': batch.batch_number,
+            },
+            'prediction': {
+                'life_score': prediction.life_score,
+                'durability_score': prediction.durability_score,
+                'stability_score': prediction.stability_score,
+                'risk_level': prediction.get_risk_level_display(),
+                'risk_score': prediction.risk_score,
+                'predicted_cycles': prediction.predicted_cycles_to_failure,
+                'predicted_hours': prediction.predicted_lifetime_hours,
+                'key_factors': prediction.key_factors,
+                'warning_signs': prediction.warning_signs,
+                'recommendations': prediction.recommendations,
+            },
+            'trend_data': trend_data,
+            'radar_data': radar_data,
+            'gauge_data': gauge_data,
+            'tension_trend': tension_trend,
+            'fatigue_sncurve': fatigue_sncurve,
+        }, json_dumps_params={'ensure_ascii': False})

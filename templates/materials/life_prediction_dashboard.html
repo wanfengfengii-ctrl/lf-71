@@ -1,0 +1,234 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}寿命预测仪表板 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📊 弓弦寿命预测与材料推荐</h1>
+    <div class="actions-row">
+        <form method="post" action="{% url 'materials:run_all_predictions' %}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">🔄 批量运行预测</button>
+        </form>
+        <form method="post" action="{% url 'materials:run_batch_rankings' %}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success">📈 更新排行榜</button>
+        </form>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">已预测批次</div>
+        <div class="stat-value">{{ pred_count }} / {{ total_batches }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">平均寿命评分</div>
+        <div class="stat-value">{{ avg_life }}<span style="font-size:1rem;color:#6b7280;"> / 100</span></div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">平均耐久性</div>
+        <div class="stat-value">{{ avg_durability }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">平均稳定性</div>
+        <div class="stat-value">{{ avg_stability }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">平均风险指数</div>
+        <div class="stat-value">{{ avg_risk }}</div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">⚠️ 断裂风险分布</div>
+        <div class="chart-container" id="riskChart"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">🚨 高风险批次预警（TOP 10）</div>
+        {% if high_risk_list %}
+        <table>
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>批次编号</th>
+                    <th>来源</th>
+                    <th>风险等级</th>
+                    <th>风险指数</th>
+                    <th>寿命评分</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pred in high_risk_list %}
+                <tr>
+                    <td>{{ forloop.counter }}</td>
+                    <td><strong>{{ pred.batch.batch_number }}</strong></td>
+                    <td>{{ pred.batch.material_source }}</td>
+                    <td><span class="badge {{ pred.risk_color_class }}">{{ pred.get_risk_level_display }}</span></td>
+                    <td style="color:#dc2626;font-weight:600;">{{ pred.risk_score }}</td>
+                    <td>{{ pred.life_score }}</td>
+                    <td><a href="{% url 'materials:life_prediction_detail' pred.pk %}" class="btn btn-sm btn-primary">详情</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无高风险批次</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">🏆 综合表现 TOP 5</div>
+        {% if top_overall %}
+        <table>
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>批次编号</th>
+                    <th>来源</th>
+                    <th>评分</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rank in top_overall %}
+                <tr>
+                    <td><strong>#{{ rank.rank }}</strong></td>
+                    <td>{{ rank.batch.batch_number }}</td>
+                    <td>{{ rank.batch.material_source }}</td>
+                    <td style="color:#16a34a;font-weight:600;">{{ rank.score }}</td>
+                    <td><a href="{% url 'materials:batch_detail' rank.batch.pk %}" class="btn btn-sm btn-secondary">查看</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><p>请先运行排行榜更新</p></div>
+        {% endif %}
+    </div>
+    <div class="card">
+        <div class="card-title">⏱️ 最近预测记录</div>
+        {% if recent_predictions %}
+        <table>
+            <thead>
+                <tr>
+                    <th>批次</th>
+                    <th>寿命评分</th>
+                    <th>耐久性</th>
+                    <th>稳定性</th>
+                    <th>风险</th>
+                    <th>预测时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pred in recent_predictions %}
+                <tr>
+                    <td><strong>{{ pred.batch.batch_number }}</strong></td>
+                    <td>{{ pred.life_score }}</td>
+                    <td>{{ pred.durability_score }}</td>
+                    <td>{{ pred.stability_score }}</td>
+                    <td><span class="badge {{ pred.risk_color_class }}">{{ pred.get_risk_level_display }}</span></td>
+                    <td style="font-size:0.8rem;color:#6b7280;">{{ pred.predicted_at|date:"m-d H:i" }}</td>
+                    <td><a href="{% url 'materials:life_prediction_detail' pred.pk %}" class="btn btn-sm btn-primary">详情</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><p>暂无预测记录，请先运行批量预测</p></div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">🏹 弓型配置参考</div>
+    {% if bow_types %}
+    <table>
+        <thead>
+            <tr>
+                <th>弓型名称</th>
+                <th>类别</th>
+                <th>拉力范围(lbs)</th>
+                <th>推荐直径(mm)</th>
+                <th>最低抗拉强度(MPa)</th>
+                <th>最低疲劳循环</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bt in bow_types %}
+            <tr>
+                <td><strong>{{ bt.name }}</strong></td>
+                <td>{{ bt.get_category_display }}</td>
+                <td>{{ bt.min_draw_weight }} - {{ bt.max_draw_weight }}</td>
+                <td>{{ bt.recommended_diameter_min }} - {{ bt.recommended_diameter_max }}</td>
+                <td>{{ bt.min_tensile_strength }}</td>
+                <td>{{ bt.min_fatigue_cycles }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>暂无弓型配置</p></div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-title">🔬 批次快速预测入口</div>
+    {% if all_batches %}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.75rem;">
+        {% for batch in all_batches %}
+        <div style="border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem 1rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="font-weight:600;color:#1e3a5f;">{{ batch.batch_number }}</div>
+                    <div style="font-size:0.8rem;color:#6b7280;">{{ batch.material_source }}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:0.3rem;">
+                    <form method="post" action="{% url 'materials:run_life_prediction' batch.pk %}" style="display:inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-primary">预测</button>
+                    </form>
+                    <a href="{% url 'materials:batch_recommendations' batch.pk %}" class="btn btn-sm btn-secondary">推荐</a>
+                    <a href="{% url 'materials:batch_bow_matching' batch.pk %}" class="btn btn-sm btn-success">匹配</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state"><p>暂无材料批次</p></div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+    const riskDist = {{ risk_dist_json|safe }};
+    const riskChart = echarts.init(document.getElementById('riskChart'));
+    const riskData = Object.entries(riskDist).map(([k, v]) => ({
+        name: v.label,
+        value: v.count,
+    }));
+    riskChart.setOption({
+        tooltip: { trigger: 'item' },
+        legend: { bottom: 0 },
+        color: ['#16a34a', '#f59e0b', '#dc2626', '#7f1d1d'],
+        series: [{
+            type: 'pie',
+            radius: ['40%', '70%'],
+            avoidLabelOverlap: false,
+            itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+            label: { show: true, formatter: '{b}\n{c}个' },
+            data: riskData,
+        }]
+    });
+    window.addEventListener('resize', () => riskChart.resize());
+</script>
+{% endblock %}

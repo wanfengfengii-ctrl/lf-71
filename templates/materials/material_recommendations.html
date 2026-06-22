@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}材料推荐 - {{ source_batch.batch_number }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>🔍 相似材料推荐</h1>
+        <p style="color:#6b7280;margin-top:0.25rem;">
+            源批次：<a href="{% url 'materials:batch_detail' source_batch.pk %}" style="color:#2563eb;">{{ source_batch.batch_number }}</a>
+            - {{ source_batch.material_source }}
+            &nbsp;|&nbsp; 直径：{{ source_batch.diameter }}mm
+        </p>
+    </div>
+    <div class="actions-row">
+        <a href="{% url 'materials:batch_detail' source_batch.pk %}" class="btn btn-secondary">← 返回批次详情</a>
+        <a href="{% url 'materials:life_prediction_dashboard' %}" class="btn btn-primary">📊 寿命预测仪表板</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">源批次直径</div>
+        <div class="stat-value">{{ source_batch.diameter }}<span style="font-size:1rem;color:#6b7280;"> mm</span></div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">源批次抗拉强度</div>
+        <div class="stat-value">
+            {% if source_batch.tensile_strength %}
+                {{ source_batch.tensile_strength }}<span style="font-size:1rem;color:#6b7280;"> MPa</span>
+            {% else %}
+                <span style="font-size:1rem;color:#9ca3af;">--</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">源批次平均回弹率</div>
+        <div class="stat-value">
+            {% if source_batch.avg_rebound_rate %}
+                {{ source_batch.avg_rebound_rate }}<span style="font-size:1rem;color:#6b7280;"> %</span>
+            {% else %}
+                <span style="font-size:1rem;color:#9ca3af;">--</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">源批次疲劳循环</div>
+        <div class="stat-value">
+            {% if source_batch.fatigue_cycles_to_failure %}
+                {{ source_batch.fatigue_cycles_to_failure }}<span style="font-size:1rem;color:#6b7280;"> 次</span>
+            {% else %}
+                <span style="font-size:1rem;color:#9ca3af;">--</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">📊 推荐对比分析图</div>
+    <div class="chart-container" id="compareChart"></div>
+</div>
+
+<div class="card">
+    <div class="card-title">🎯 推荐材料列表</div>
+    {% if recommendations %}
+    <table>
+        <thead>
+            <tr>
+                <th>排名</th>
+                <th>推荐批次</th>
+                <th>来源</th>
+                <th>直径(mm)</th>
+                <th>相似度</th>
+                <th>性能提升</th>
+                <th>综合推荐分</th>
+                <th>寿命评分</th>
+                <th>风险等级</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in recommendations %}
+            {% with rec=item.recommendation gains=item.gains target_pred=item.target_prediction %}
+            <tr>
+                <td><strong>#{{ forloop.counter }}</strong></td>
+                <td><strong>{{ rec.recommended_batch.batch_number }}</strong></td>
+                <td>{{ rec.recommended_batch.material_source }}</td>
+                <td>{{ rec.recommended_batch.diameter }}</td>
+                <td style="font-weight:600;">{{ rec.similarity_score }}</td>
+                <td style="font-weight:600;color:{% if rec.performance_score >= 0 %}#16a34a{% else %}#dc2626{% endif %};">
+                    {% if rec.performance_score >= 0 %}+{% endif %}{{ rec.performance_score }}
+                </td>
+                <td style="font-weight:700;color:#1e3a5f;">{{ rec.overall_score }}</td>
+                <td>{{ target_pred.life_score }}</td>
+                <td><span class="badge {{ target_pred.risk_color_class }}">{{ target_pred.get_risk_level_display }}</span></td>
+                <td>
+                    <a href="{% url 'materials:batch_detail' rec.recommended_batch.pk %}" class="btn btn-sm btn-secondary">详情</a>
+                    {% if target_pred %}
+                    <a href="{% url 'materials:life_prediction_detail' target_pred.pk %}" class="btn btn-sm btn-primary">预测</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% if rec.advantages or rec.caveats or rec.similarity_factors %}
+            <tr style="background:#f9fafb;">
+                <td colspan="10" style="padding:1rem;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+                        {% if rec.similarity_factors %}
+                        <div>
+                            <div style="font-weight:600;color:#374151;margin-bottom:0.5rem;">📐 相似度因素</div>
+                            <div style="font-size:0.85rem;color:#6b7280;line-height:1.8;">
+                                {% for key, val in rec.similarity_factors.items %}
+                                <div>
+                                    {% if key == 'diameter' %}直径{% elif key == 'tensile_strength' %}抗拉强度{% elif key == 'youngs_modulus' %}杨氏模量{% elif key == 'rebound_rate' %}回弹率{% elif key == 'material_source' %}材料来源{% elif key == 'elongation_at_break' %}断裂伸长率{% else %}{{ key }}{% endif %}
+                                    ：<span style="font-weight:600;color:#1e3a5f;">{{ val }}%</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if rec.advantages %}
+                        <div>
+                            <div style="font-weight:600;color:#166534;margin-bottom:0.5rem;">✅ 推荐优势</div>
+                            <ul style="padding-left:1.25rem;font-size:0.85rem;color:#166534;line-height:1.8;">
+                                {% for adv in rec.advantages %}
+                                <li>{{ adv }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                        {% if rec.caveats %}
+                        <div>
+                            <div style="font-weight:600;color:#92400e;margin-bottom:0.5rem;">⚠️ 注意事项</div>
+                            <ul style="padding-left:1.25rem;font-size:0.85rem;color:#92400e;line-height:1.8;">
+                                {% for cav in rec.caveats %}
+                                <li>{{ cav }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% if gains %}
+                    <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px dashed #e5e7eb;">
+                        <div style="font-weight:600;color:#374151;margin-bottom:0.35rem;">📈 性能增益对比</div>
+                        <div style="display:flex;gap:1.5rem;font-size:0.85rem;color:#6b7280;">
+                            <span>寿命评分增益：<strong style="color:{% if gains.life_score >= 0 %}#16a34a{% else %}#dc2626{% endif %};">{% if gains.life_score >= 0 %}+{% endif %}{{ gains.life_score }}</strong></span>
+                            <span>耐久性增益：<strong style="color:{% if gains.durability >= 0 %}#16a34a{% else %}#dc2626{% endif %};">{% if gains.durability >= 0 %}+{% endif %}{{ gains.durability }}</strong></span>
+                            <span>稳定性增益：<strong style="color:{% if gains.stability >= 0 %}#16a34a{% else %}#dc2626{% endif %};">{% if gains.stability >= 0 %}+{% endif %}{{ gains.stability }}</strong></span>
+                            <span>风险降低：<strong style="color:#16a34a;">{% if gains.risk_reduction >= 0 %}+{% endif %}{{ gains.risk_reduction }}</strong></span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            {% endwith %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无推荐结果</p>
+        <p style="margin-top:0.5rem;font-size:0.9rem;color:#9ca3af;">可能是暂无其他批次数据可比较</p>
+    </div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+    const chartData = {{ chart_data_json|safe }};
+    const chart = echarts.init(document.getElementById('compareChart'));
+    chart.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { top: 0, data: ['相似度', '性能评分', '综合推荐分'] },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: chartData.map(d => d.name), axisLabel: { rotate: 20 } },
+        yAxis: { type: 'value', max: 100 },
+        series: [
+            { name: '相似度', type: 'bar', data: chartData.map(d => d.similarity), itemStyle: { color: '#2563eb' }, barWidth: 20 },
+            { name: '性能评分', type: 'bar', data: chartData.map(d => d.performance), itemStyle: { color: '#16a34a' }, barWidth: 20 },
+            { name: '综合推荐分', type: 'bar', data: chartData.map(d => d.overall), itemStyle: { color: '#9333ea' }, barWidth: 20 },
+        ]
+    });
+    window.addEventListener('resize', () => chart.resize());
+</script>
+{% endblock %}

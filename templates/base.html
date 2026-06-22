@@ -394,8 +394,10 @@
             </a>
             <nav>
                 <a href="{% url 'materials:dashboard' %}" {% if request.resolver_match.url_name == 'dashboard' %}class="active"{% endif %}>首页</a>
-                <a href="{% url 'materials:batch_list' %}" {% if 'batch' in request.resolver_match.url_name and request.resolver_match.url_name != 'batch_compare' %}class="active"{% endif %}>材料批次</a>
+                <a href="{% url 'materials:batch_list' %}" {% if 'batch' in request.resolver_match.url_name and request.resolver_match.url_name != 'batch_compare' and 'recommendation' not in request.resolver_match.url_name and 'bow_matching' not in request.resolver_match.url_name %}class="active"{% endif %}>材料批次</a>
                 <a href="{% url 'materials:batch_compare' %}" {% if request.resolver_match.url_name == 'batch_compare' %}class="active"{% endif %}>批次对比</a>
+                <a href="{% url 'materials:life_prediction_dashboard' %}" {% if request.resolver_match.url_name == 'life_prediction_dashboard' or request.resolver_match.url_name == 'life_prediction_detail' %}class="active"{% endif %}>寿命预测</a>
+                <a href="{% url 'materials:batch_ranking' %}" {% if request.resolver_match.url_name == 'batch_ranking' %}class="active"{% endif %}>批次排行</a>
                 <a href="{% url 'materials:statistics' %}" {% if request.resolver_match.url_name == 'statistics' %}class="active"{% endif %}>统计分析</a>
                 <a href="{% url 'materials:anomaly_list' %}" {% if request.resolver_match.url_name == 'anomaly_list' or request.resolver_match.url_name == 'anomaly_resolve' %}class="active"{% endif %}>异常数据{% if unresolved_anomaly_count %}<span class="nav-badge"></span>{% endif %}</a>
                 <a href="/admin/">管理后台</a>

@@ -846,3 +846,349 @@ class DataAnomalyLog(models.Model):
 
     def __str__(self):
         return f'{self.batch.batch_number} - {self.get_severity_display()} - {self.anomaly_description[:30]}'
+
+
+class BowType(models.Model):
+    CATEGORY_TRADITIONAL = 'traditional'
+    CATEGORY_COMPOUND = 'compound'
+    CATEGORY_RECURVE = 'recurve'
+    CATEGORY_LONGBOW = 'longbow'
+    CATEGORY_CROSSBOW = 'crossbow'
+
+    CATEGORY_CHOICES = [
+        (CATEGORY_TRADITIONAL, '传统弓'),
+        (CATEGORY_COMPOUND, '复合弓'),
+        (CATEGORY_RECURVE, '反曲弓'),
+        (CATEGORY_LONGBOW, '长弓'),
+        (CATEGORY_CROSSBOW, '弩'),
+    ]
+
+    name = models.CharField(
+        max_length=100,
+        verbose_name='弓型名称'
+    )
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default=CATEGORY_TRADITIONAL,
+        verbose_name='弓型类别'
+    )
+    min_draw_weight = models.FloatField(
+        verbose_name='最小拉力要求(lbs)',
+        help_text='弓的最小拉力要求，单位磅'
+    )
+    max_draw_weight = models.FloatField(
+        verbose_name='最大拉力要求(lbs)',
+        help_text='弓的最大拉力要求，单位磅'
+    )
+    draw_length = models.FloatField(
+        verbose_name='拉距(英寸)',
+        help_text='标准拉距，单位英寸'
+    )
+    recommended_diameter_min = models.FloatField(
+        verbose_name='推荐弓弦最小直径(mm)',
+        help_text='推荐弓弦材料的最小直径'
+    )
+    recommended_diameter_max = models.FloatField(
+        verbose_name='推荐弓弦最大直径(mm)',
+        help_text='推荐弓弦材料的最大直径'
+    )
+    min_tensile_strength = models.FloatField(
+        verbose_name='最低抗拉强度要求(MPa)',
+        help_text='弓弦材料的最低抗拉强度要求'
+    )
+    min_fatigue_cycles = models.IntegerField(
+        verbose_name='最低疲劳循环次数要求',
+        help_text='弓弦材料在标准载荷下的最低循环次数要求'
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name='弓型说明'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+
+    class Meta:
+        verbose_name = '弓型配置'
+        verbose_name_plural = '弓型配置'
+        ordering = ['category', 'name']
+
+    def __str__(self):
+        return f'{self.get_category_display()} - {self.name}'
+
+    def lbs_to_newtons(self, lbs):
+        return round(lbs * 4.44822, 2)
+
+    @property
+    def min_draw_force_newtons(self):
+        return self.lbs_to_newtons(self.min_draw_weight)
+
+    @property
+    def max_draw_force_newtons(self):
+        return self.lbs_to_newtons(self.max_draw_weight)
+
+
+class LifePrediction(models.Model):
+    RISK_LEVEL_LOW = 'low'
+    RISK_LEVEL_MEDIUM = 'medium'
+    RISK_LEVEL_HIGH = 'high'
+    RISK_LEVEL_CRITICAL = 'critical'
+
+    RISK_LEVEL_CHOICES = [
+        (RISK_LEVEL_LOW, '低风险'),
+        (RISK_LEVEL_MEDIUM, '中风险'),
+        (RISK_LEVEL_HIGH, '高风险'),
+        (RISK_LEVEL_CRITICAL, '极高风险'),
+    ]
+
+    batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='life_predictions',
+        verbose_name='材料批次'
+    )
+    life_score = models.FloatField(
+        verbose_name='寿命评分(0-100)',
+        help_text='综合耐久性评分，0-100分'
+    )
+    durability_score = models.FloatField(
+        verbose_name='耐久性评分',
+        help_text='基于拉伸和疲劳测试的耐久性评分'
+    )
+    stability_score = models.FloatField(
+        verbose_name='稳定性评分',
+        help_text='基于回弹率和数据一致性的稳定性评分'
+    )
+    risk_level = models.CharField(
+        max_length=20,
+        choices=RISK_LEVEL_CHOICES,
+        verbose_name='断裂风险等级'
+    )
+    risk_score = models.FloatField(
+        verbose_name='风险指数(0-100)',
+        help_text='断裂风险指数，越高风险越大'
+    )
+    predicted_cycles_to_failure = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='预测断裂循环次数'
+    )
+    predicted_lifetime_hours = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='预计使用寿命(小时)'
+    )
+    key_factors = models.JSONField(
+        default=list,
+        verbose_name='关键影响因素'
+    )
+    warning_signs = models.JSONField(
+        default=list,
+        verbose_name='预警信号'
+    )
+    recommendations = models.TextField(
+        blank=True,
+        verbose_name='优化建议'
+    )
+    predicted_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='预测时间'
+    )
+    is_latest = models.BooleanField(
+        default=True,
+        verbose_name='是否为最新预测'
+    )
+
+    class Meta:
+        verbose_name = '寿命预测记录'
+        verbose_name_plural = '寿命预测记录'
+        ordering = ['-predicted_at']
+
+    def __str__(self):
+        return f'{self.batch.batch_number} - 评分:{self.life_score:.1f} - {self.get_risk_level_display()}'
+
+    def save(self, *args, **kwargs):
+        if self.is_latest:
+            LifePrediction.objects.filter(
+                batch=self.batch,
+                is_latest=True
+            ).exclude(pk=self.pk).update(is_latest=False)
+        super().save(*args, **kwargs)
+
+    @property
+    def risk_color_class(self):
+        mapping = {
+            self.RISK_LEVEL_LOW: 'badge-success',
+            self.RISK_LEVEL_MEDIUM: 'badge-warning',
+            self.RISK_LEVEL_HIGH: 'badge-danger',
+            self.RISK_LEVEL_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.risk_level, 'badge-gray')
+
+
+class MaterialRecommendation(models.Model):
+    source_batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='recommendations_from',
+        verbose_name='源材料批次'
+    )
+    recommended_batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='recommendations_to',
+        verbose_name='推荐材料批次'
+    )
+    similarity_score = models.FloatField(
+        verbose_name='相似度评分(0-100)',
+        help_text='材料属性相似度评分'
+    )
+    performance_score = models.FloatField(
+        verbose_name='性能提升评分',
+        help_text='推荐材料相对于源材料的性能提升'
+    )
+    overall_score = models.FloatField(
+        verbose_name='综合推荐评分',
+        help_text='综合相似度和性能提升的推荐评分'
+    )
+    similarity_factors = models.JSONField(
+        default=dict,
+        verbose_name='相似度因素详情'
+    )
+    advantages = models.JSONField(
+        default=list,
+        verbose_name='推荐优势'
+    )
+    caveats = models.JSONField(
+        default=list,
+        verbose_name='注意事项'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='推荐时间'
+    )
+
+    class Meta:
+        verbose_name = '材料推荐记录'
+        verbose_name_plural = '材料推荐记录'
+        ordering = ['-overall_score']
+        unique_together = [['source_batch', 'recommended_batch']]
+
+    def __str__(self):
+        return f'{self.source_batch.batch_number} → {self.recommended_batch.batch_number} ({self.overall_score:.1f})'
+
+
+class BowTypeMatching(models.Model):
+    MATCH_LEVEL_EXCELLENT = 'excellent'
+    MATCH_LEVEL_GOOD = 'good'
+    MATCH_LEVEL_FAIR = 'fair'
+    MATCH_LEVEL_POOR = 'poor'
+
+    MATCH_LEVEL_CHOICES = [
+        (MATCH_LEVEL_EXCELLENT, '极佳匹配'),
+        (MATCH_LEVEL_GOOD, '良好匹配'),
+        (MATCH_LEVEL_FAIR, '一般匹配'),
+        (MATCH_LEVEL_POOR, '不推荐'),
+    ]
+
+    batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='bow_type_matchings',
+        verbose_name='材料批次'
+    )
+    bow_type = models.ForeignKey(
+        BowType,
+        on_delete=models.CASCADE,
+        related_name='material_matchings',
+        verbose_name='弓型'
+    )
+    match_level = models.CharField(
+        max_length=20,
+        choices=MATCH_LEVEL_CHOICES,
+        verbose_name='匹配等级'
+    )
+    match_score = models.FloatField(
+        verbose_name='匹配度评分(0-100)',
+        help_text='材料与弓型的综合匹配度'
+    )
+    criteria_results = models.JSONField(
+        default=dict,
+        verbose_name='各项匹配标准结果'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='匹配说明'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='匹配时间'
+    )
+
+    class Meta:
+        verbose_name = '弓型匹配记录'
+        verbose_name_plural = '弓型匹配记录'
+        ordering = ['-match_score']
+        unique_together = [['batch', 'bow_type']]
+
+    def __str__(self):
+        return f'{self.batch.batch_number} ↔ {self.bow_type.name} ({self.match_score:.1f})'
+
+    @property
+    def match_color_class(self):
+        mapping = {
+            self.MATCH_LEVEL_EXCELLENT: 'badge-success',
+            self.MATCH_LEVEL_GOOD: 'badge-info',
+            self.MATCH_LEVEL_FAIR: 'badge-warning',
+            self.MATCH_LEVEL_POOR: 'badge-danger',
+        }
+        return mapping.get(self.match_level, 'badge-gray')
+
+
+class BatchRanking(models.Model):
+    RANKING_TYPE_LIFETIME = 'lifetime'
+    RANKING_TYPE_DURABILITY = 'durability'
+    RANKING_TYPE_STABILITY = 'stability'
+    RANKING_TYPE_PERFORMANCE = 'performance'
+    RANKING_TYPE_OVERALL = 'overall'
+
+    RANKING_TYPE_CHOICES = [
+        (RANKING_TYPE_LIFETIME, '寿命排行'),
+        (RANKING_TYPE_DURABILITY, '耐久性排行'),
+        (RANKING_TYPE_STABILITY, '稳定性排行'),
+        (RANKING_TYPE_PERFORMANCE, '性能排行'),
+        (RANKING_TYPE_OVERALL, '综合排行'),
+    ]
+
+    batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='rankings',
+        verbose_name='材料批次'
+    )
+    ranking_type = models.CharField(
+        max_length=20,
+        choices=RANKING_TYPE_CHOICES,
+        verbose_name='排行类型'
+    )
+    rank = models.IntegerField(
+        verbose_name='排名'
+    )
+    score = models.FloatField(
+        verbose_name='排行评分'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='排行时间'
+    )
+
+    class Meta:
+        verbose_name = '批次排行记录'
+        verbose_name_plural = '批次排行记录'
+        ordering = ['ranking_type', 'rank']
+        unique_together = [['ranking_type', 'batch']]
+
+    def __str__(self):
+        return f'#{self.rank} {self.batch.batch_number} - {self.get_ranking_type_display()}'

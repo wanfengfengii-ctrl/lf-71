@@ -1,0 +1,303 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}寿命预测详情 - {{ prediction.batch.batch_number }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>📊 寿命预测详情</h1>
+        <p style="color:#6b7280;margin-top:0.25rem;">
+            批次：<a href="{% url 'materials:batch_detail' batch.pk %}" style="color:#2563eb;">{{ batch.batch_number }}</a> - {{ batch.material_source }}
+            &nbsp;|&nbsp; 预测时间：{{ prediction.predicted_at|date:"Y-m-d H:i" }}
+        </p>
+    </div>
+    <div class="actions-row">
+        <form method="post" action="{% url 'materials:run_life_prediction' batch.pk %}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">🔄 重新预测</button>
+        </form>
+        <a href="{% url 'materials:batch_recommendations' batch.pk %}" class="btn btn-success">🔍 相似材料推荐</a>
+        <a href="{% url 'materials:batch_bow_matching' batch.pk %}" class="btn btn-secondary">🏹 弓型匹配</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card green">
+        <div class="stat-label">综合寿命评分</div>
+        <div class="stat-value">{{ prediction.life_score }}<span style="font-size:1rem;color:#6b7280;"> / 100</span></div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">耐久性评分</div>
+        <div class="stat-value">{{ prediction.durability_score }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">稳定性评分</div>
+        <div class="stat-value">{{ prediction.stability_score }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">断裂风险等级</div>
+        <div class="stat-value" style="font-size:1.3rem;">
+            <span class="badge {{ prediction.risk_color_class }}">{{ prediction.get_risk_level_display }}</span>
+        </div>
+        <div style="margin-top:0.35rem;font-size:0.85rem;color:#6b7280;">风险指数：{{ prediction.risk_score }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">预测断裂循环次数</div>
+        <div class="stat-value">
+            {% if prediction.predicted_cycles_to_failure %}
+                {{ prediction.predicted_cycles_to_failure }}<span style="font-size:1rem;color:#6b7280;"> 次</span>
+            {% else %}
+                <span style="color:#9ca3af;font-size:1rem;">--</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">预计使用寿命</div>
+        <div class="stat-value">
+            {% if prediction.predicted_lifetime_hours %}
+                {{ prediction.predicted_lifetime_hours }}<span style="font-size:1rem;color:#6b7280;"> 小时</span>
+            {% else %}
+                <span style="color:#9ca3af;font-size:1rem;">--</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">📈 评分构成分析</div>
+        <div class="chart-container" id="factorChart"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">🕸️ 综合性能雷达图</div>
+        <div class="chart-container" id="radarChart"></div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">📉 历史预测趋势</div>
+    <div class="chart-container" id="historyChart" style="height:320px;"></div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">🔑 关键影响因素</div>
+        {% if prediction.key_factors %}
+        <ul style="padding-left:1.25rem;">
+            {% for factor in prediction.key_factors %}
+            <li style="padding:0.3rem 0;color:#374151;">{{ factor }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty-state"><p>暂无数据</p></div>
+        {% endif %}
+    </div>
+    <div class="card">
+        <div class="card-title">⚠️ 预警信号</div>
+        {% if prediction.warning_signs %}
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+            {% for sign in prediction.warning_signs %}
+            <div class="alert alert-warning" style="margin:0;">{{ sign }}</div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state"><p style="color:#166534;">✅ 当前无预警信号，状态良好</p></div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">💡 优化建议</div>
+    {% if prediction.recommendations %}
+    <div class="alert alert-info" style="white-space:pre-line;">{{ prediction.recommendations }}</div>
+    {% else %}
+    <div class="empty-state"><p>暂无建议</p></div>
+    {% endif %}
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">🏹 适用弓型匹配（TOP 5）</div>
+        {% if bow_matchings %}
+        <table>
+            <thead>
+                <tr>
+                    <th>弓型</th>
+                    <th>类别</th>
+                    <th>匹配度</th>
+                    <th>等级</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in bow_matchings %}
+                <tr>
+                    <td><strong>{{ m.bow_type.name }}</strong></td>
+                    <td>{{ m.bow_type.get_category_display }}</td>
+                    <td style="font-weight:600;">{{ m.match_score }}</td>
+                    <td><span class="badge {{ m.match_color_class }}">{{ m.get_match_level_display }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div style="margin-top:0.75rem;">
+            <a href="{% url 'materials:batch_bow_matching' batch.pk %}" class="btn btn-sm btn-primary">查看完整匹配</a>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>暂无匹配数据</p></div>
+        {% endif %}
+        <div class="chart-container" id="bowChart" style="height:240px;margin-top:1rem;"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">🔀 相似材料推荐（TOP 5）</div>
+        {% if recommendations %}
+        <table>
+            <thead>
+                <tr>
+                    <th>推荐批次</th>
+                    <th>相似度</th>
+                    <th>性能提升</th>
+                    <th>综合评分</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in recommendations %}
+                <tr>
+                    <td><strong>{{ rec.recommended_batch.batch_number }}</strong></td>
+                    <td>{{ rec.similarity_score }}</td>
+                    <td style="color:{% if rec.performance_score >= 0 %}#16a34a{% else %}#dc2626{% endif %};font-weight:600;">
+                        {% if rec.performance_score >= 0 %}+{% endif %}{{ rec.performance_score }}
+                    </td>
+                    <td style="font-weight:600;">{{ rec.overall_score }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div style="margin-top:0.75rem;">
+            <a href="{% url 'materials:batch_recommendations' batch.pk %}" class="btn btn-sm btn-primary">查看完整推荐</a>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>暂无推荐数据</p></div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">📜 历史预测记录</div>
+    {% if history %}
+    <table>
+        <thead>
+            <tr>
+                <th>预测时间</th>
+                <th>寿命评分</th>
+                <th>耐久性</th>
+                <th>稳定性</th>
+                <th>风险等级</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in history %}
+            <tr style="{% if p.pk == prediction.pk %}background:#eff6ff;{% endif %}">
+                <td>{{ p.predicted_at|date:"Y-m-d H:i" }}</td>
+                <td>{{ p.life_score }}</td>
+                <td>{{ p.durability_score }}</td>
+                <td>{{ p.stability_score }}</td>
+                <td><span class="badge {{ p.risk_color_class }}">{{ p.get_risk_level_display }}</span></td>
+                <td>
+                    {% if p.pk != prediction.pk %}
+                    <a href="{% url 'materials:life_prediction_detail' p.pk %}" class="btn btn-sm btn-secondary">查看</a>
+                    {% else %}
+                    <span class="badge badge-info">当前</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>暂无历史记录</p></div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+    const factorData = {{ factor_breakdown_json|safe }};
+    const factorChart = echarts.init(document.getElementById('factorChart'));
+    factorChart.setOption({
+        tooltip: { trigger: 'item' },
+        series: [{
+            type: 'pie',
+            radius: ['45%', '75%'],
+            center: ['50%', '50%'],
+            itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+            label: { show: true, formatter: '{b}\n{d}%' },
+            data: factorData.map(d => ({ name: d.label, value: d.value, itemStyle: { color: d.color } })),
+        }]
+    });
+
+    const radarData = {{ radar_data_json|safe }};
+    const radarChart = echarts.init(document.getElementById('radarChart'));
+    radarChart.setOption({
+        tooltip: {},
+        radar: {
+            indicator: radarData.labels.map(l => ({ name: l, max: 100 })),
+            shape: 'polygon',
+            splitArea: { areaStyle: { color: ['rgba(37,99,235,0.02)', 'rgba(37,99,235,0.05)'] } },
+        },
+        series: [{
+            type: 'radar',
+            data: [{
+                value: radarData.values,
+                name: '性能指标',
+                areaStyle: { color: 'rgba(37,99,235,0.25)' },
+                lineStyle: { color: '#2563eb', width: 2 },
+                itemStyle: { color: '#2563eb' },
+            }]
+        }]
+    });
+
+    const historyData = {{ history_chart_json|safe }};
+    const historyChart = echarts.init(document.getElementById('historyChart'));
+    historyChart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { top: 0, data: ['寿命评分', '耐久性', '稳定性', '风险指数'] },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: historyData.map(d => d.x), boundaryGap: false },
+        yAxis: { type: 'value', max: 100 },
+        series: [
+            { name: '寿命评分', type: 'line', smooth: true, data: historyData.map(d => d.life_score), itemStyle: { color: '#2563eb' }, areaStyle: { color: 'rgba(37,99,235,0.1)' } },
+            { name: '耐久性', type: 'line', smooth: true, data: historyData.map(d => d.durability), itemStyle: { color: '#16a34a' } },
+            { name: '稳定性', type: 'line', smooth: true, data: historyData.map(d => d.stability), itemStyle: { color: '#9333ea' } },
+            { name: '风险指数', type: 'line', smooth: true, data: historyData.map(d => d.risk_score), itemStyle: { color: '#dc2626' } },
+        ]
+    });
+
+    const bowChartData = {{ bow_chart_json|safe }};
+    const bowChart = echarts.init(document.getElementById('bowChart'));
+    bowChart.setOption({
+        tooltip: { trigger: 'axis' },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: bowChartData.map(d => d.name), axisLabel: { rotate: 20 } },
+        yAxis: { type: 'value', max: 100 },
+        series: [{
+            type: 'bar',
+            data: bowChartData.map(d => ({
+                value: d.score,
+                itemStyle: {
+                    color: d.level === '极佳匹配' ? '#16a34a' : d.level === '良好匹配' ? '#2563eb' : d.level === '一般匹配' ? '#f59e0b' : '#dc2626'
+                }
+            })),
+            barWidth: '50%',
+            label: { show: true, position: 'top' },
+        }]
+    });
+
+    window.addEventListener('resize', () => {
+        factorChart.resize();
+        radarChart.resize();
+        historyChart.resize();
+        bowChart.resize();
+    });
+</script>
+{% endblock %}
