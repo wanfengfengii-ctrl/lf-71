@@ -1192,3 +1192,1300 @@ class BatchRanking(models.Model):
 
     def __str__(self):
         return f'#{self.rank} {self.batch.batch_number} - {self.get_ranking_type_display()}'
+
+
+class ProcessRecipe(models.Model):
+    RECIPE_TYPE_TRADITIONAL = 'traditional'
+    RECIPE_TYPE_MODERN = 'modern'
+    RECIPE_TYPE_HYBRID = 'hybrid'
+    RECIPE_TYPE_EXPERIMENTAL = 'experimental'
+
+    RECIPE_TYPE_CHOICES = [
+        (RECIPE_TYPE_TRADITIONAL, '传统工艺'),
+        (RECIPE_TYPE_MODERN, '现代工艺'),
+        (RECIPE_TYPE_HYBRID, '混合工艺'),
+        (RECIPE_TYPE_EXPERIMENTAL, '实验工艺'),
+    ]
+
+    STATUS_DRAFT = 'draft'
+    STATUS_VALIDATED = 'validated'
+    STATUS_APPROVED = 'approved'
+    STATUS_OBSOLETE = 'obsolete'
+
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, '草稿'),
+        (STATUS_VALIDATED, '已验证'),
+        (STATUS_APPROVED, '已批准'),
+        (STATUS_OBSOLETE, '已废弃'),
+    ]
+
+    recipe_code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name='配方编号',
+        help_text='工艺配方唯一编号'
+    )
+    recipe_name = models.CharField(
+        max_length=200,
+        verbose_name='配方名称'
+    )
+    recipe_type = models.CharField(
+        max_length=30,
+        choices=RECIPE_TYPE_CHOICES,
+        default=RECIPE_TYPE_TRADITIONAL,
+        verbose_name='配方类型'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        verbose_name='配方状态'
+    )
+    target_bow_type = models.ForeignKey(
+        BowType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='recipes',
+        verbose_name='目标弓型'
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name='配方说明'
+    )
+    base_material = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='基础材料',
+        help_text='主要使用的材料，如蚕丝、麻、合成纤维等'
+    )
+    twist_direction = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name='捻向',
+        help_text='S捻或Z捻'
+    )
+    twist_count = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='捻度(捻/m)',
+        help_text='每米捻回数'
+    )
+    strand_count = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='股数',
+        help_text='弓弦的股线数量'
+    )
+    coating_material = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='涂层材料',
+        help_text='如蜂蜡、树脂等'
+    )
+    curing_method = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='固化方式',
+        help_text='如自然风干、加热固化等'
+    )
+    curing_temperature = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='固化温度(°C)'
+    )
+    curing_duration = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='固化时间(小时)'
+    )
+    pretreatment_process = models.TextField(
+        blank=True,
+        verbose_name='预处理工艺'
+    )
+    weaving_method = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='编织方式',
+        help_text='如编织法、绞缠法等'
+    )
+    created_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='创建人'
+    )
+    approved_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='批准人'
+    )
+    approved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='批准时间'
+    )
+    version = models.CharField(
+        max_length=20,
+        default='1.0',
+        verbose_name='版本号'
+    )
+    parent_recipe = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='derived_recipes',
+        verbose_name='源配方'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='更新时间'
+    )
+
+    class Meta:
+        verbose_name = '工艺配方'
+        verbose_name_plural = '工艺配方'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.recipe_code} - {self.recipe_name}'
+
+    def clean(self):
+        if self.twist_count is not None and self.twist_count < 0:
+            raise ValidationError({'twist_count': '捻度不能为负数'})
+        if self.strand_count is not None and self.strand_count <= 0:
+            raise ValidationError({'strand_count': '股数必须大于0'})
+        if self.curing_temperature is not None and self.curing_temperature < -273:
+            raise ValidationError({'curing_temperature': '温度不能低于绝对零度'})
+        if self.curing_duration is not None and self.curing_duration < 0:
+            raise ValidationError({'curing_duration': '固化时间不能为负数'})
+        super().clean()
+
+    @property
+    def param_count(self):
+        return self.params.count()
+
+    @property
+    def trial_count(self):
+        return self.trials.count()
+
+    @property
+    def latest_prediction(self):
+        return self.predictions.order_by('-predicted_at').first()
+
+    def get_param_dict(self):
+        return {
+            p.param_name: {
+                'value': p.param_value,
+                'unit': p.param_unit,
+                'type': p.param_type,
+            }
+            for p in self.params.all()
+        }
+
+    def get_performance_summary(self):
+        results = TrialResult.objects.filter(trial_plan__recipe=self)
+        if not results.exists():
+            return None
+        durabilities = list(results.filter(durability_score__isnull=False).values_list('durability_score', flat=True))
+        stabilities = list(results.filter(stability_score__isnull=False).values_list('stability_score', flat=True))
+        rebounds = list(results.filter(rebound_performance__isnull=False).values_list('rebound_performance', flat=True))
+        return {
+            'trial_count': results.count(),
+            'avg_durability': round(sum(durabilities) / len(durabilities), 2) if durabilities else None,
+            'avg_stability': round(sum(stabilities) / len(stabilities), 2) if stabilities else None,
+            'avg_rebound': round(sum(rebounds) / len(rebounds), 2) if rebounds else None,
+        }
+
+
+class RecipeParam(models.Model):
+    PARAM_TYPE_MATERIAL = 'material'
+    PARAM_TYPE_PROCESS = 'process'
+    PARAM_TYPE_ENVIRONMENT = 'environment'
+    PARAM_TYPE_QUALITY = 'quality'
+
+    PARAM_TYPE_CHOICES = [
+        (PARAM_TYPE_MATERIAL, '材料属性'),
+        (PARAM_TYPE_PROCESS, '工艺参数'),
+        (PARAM_TYPE_ENVIRONMENT, '环境条件'),
+        (PARAM_TYPE_QUALITY, '质量指标'),
+    ]
+
+    recipe = models.ForeignKey(
+        ProcessRecipe,
+        on_delete=models.CASCADE,
+        related_name='params',
+        verbose_name='所属配方'
+    )
+    param_name = models.CharField(
+        max_length=100,
+        verbose_name='参数名称'
+    )
+    param_value = models.FloatField(
+        verbose_name='参数值'
+    )
+    param_unit = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name='单位'
+    )
+    param_type = models.CharField(
+        max_length=20,
+        choices=PARAM_TYPE_CHOICES,
+        default=PARAM_TYPE_PROCESS,
+        verbose_name='参数类型'
+    )
+    min_value = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='最小值',
+        help_text='参数允许的最小值'
+    )
+    max_value = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='最大值',
+        help_text='参数允许的最大值'
+    )
+    is_critical = models.BooleanField(
+        default=False,
+        verbose_name='关键参数',
+        help_text='是否为影响性能的关键参数'
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name='参数说明'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='记录时间'
+    )
+
+    class Meta:
+        verbose_name = '配方工艺参数'
+        verbose_name_plural = '配方工艺参数'
+        ordering = ['param_type', 'param_name']
+        unique_together = [['recipe', 'param_name']]
+
+    def __str__(self):
+        return f'{self.recipe.recipe_code} - {self.param_name}: {self.param_value}{self.param_unit}'
+
+    def clean(self):
+        if self.param_value is None:
+            raise ValidationError({'param_value': '参数值不能为空'})
+        if self.min_value is not None and self.param_value < self.min_value:
+            raise ValidationError({'param_value': f'参数值不能小于最小值{self.min_value}'})
+        if self.max_value is not None and self.param_value > self.max_value:
+            raise ValidationError({'param_value': f'参数值不能大于最大值{self.max_value}'})
+        super().clean()
+
+    @property
+    def tolerance_range(self):
+        if self.min_value is not None and self.max_value is not None:
+            return self.max_value - self.min_value
+        return None
+
+
+class PerformanceTarget(models.Model):
+    recipe = models.ForeignKey(
+        ProcessRecipe,
+        on_delete=models.CASCADE,
+        related_name='performance_targets',
+        verbose_name='所属配方'
+    )
+    target_name = models.CharField(
+        max_length=100,
+        verbose_name='目标名称'
+    )
+    target_category = models.CharField(
+        max_length=50,
+        choices=[
+            ('durability', '耐久性'),
+            ('stability', '稳定性'),
+            ('rebound', '回弹表现'),
+            ('strength', '强度'),
+            ('lifespan', '使用寿命'),
+            ('risk', '风险等级'),
+            ('other', '其他'),
+        ],
+        default='durability',
+        verbose_name='目标类别'
+    )
+    target_value = models.FloatField(
+        verbose_name='目标值'
+    )
+    target_unit = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name='单位'
+    )
+    comparison_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('>=', '大于等于'),
+            ('<=', '小于等于'),
+            ('=', '等于'),
+            ('>', '大于'),
+            ('<', '小于'),
+            ('range', '范围内'),
+        ],
+        default='>=',
+        verbose_name='比较方式'
+    )
+    min_target = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='最小目标值'
+    )
+    max_target = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='最大目标值'
+    )
+    priority = models.IntegerField(
+        default=1,
+        verbose_name='优先级',
+        help_text='数字越小优先级越高'
+    )
+    is_mandatory = models.BooleanField(
+        default=True,
+        verbose_name='必须达成',
+        help_text='是否为必须达成的关键目标'
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name='目标说明'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+
+    class Meta:
+        verbose_name = '性能目标'
+        verbose_name_plural = '性能目标'
+        ordering = ['priority', 'target_category']
+
+    def __str__(self):
+        return f'{self.recipe.recipe_code} - {self.target_name}: {self.comparison_type}{self.target_value}{self.target_unit}'
+
+    def clean(self):
+        if self.comparison_type == 'range':
+            if self.min_target is None or self.max_target is None:
+                raise ValidationError('选择"范围内"时必须填写最小和最大目标值')
+            if self.min_target > self.max_target:
+                raise ValidationError({'min_target': '最小目标值不能大于最大目标值'})
+        super().clean()
+
+    def evaluate(self, actual_value):
+        if actual_value is None:
+            return None
+        if self.comparison_type == '>=':
+            return actual_value >= self.target_value
+        elif self.comparison_type == '<=':
+            return actual_value <= self.target_value
+        elif self.comparison_type == '=':
+            return abs(actual_value - self.target_value) < 0.001
+        elif self.comparison_type == '>':
+            return actual_value > self.target_value
+        elif self.comparison_type == '<':
+            return actual_value < self.target_value
+        elif self.comparison_type == 'range':
+            return self.min_target <= actual_value <= self.max_target
+        return None
+
+
+class TrialPlan(models.Model):
+    PLAN_STATUS_PLANNING = 'planning'
+    PLAN_STATUS_IN_PROGRESS = 'in_progress'
+    PLAN_STATUS_COMPLETED = 'completed'
+    PLAN_STATUS_CANCELLED = 'cancelled'
+    PLAN_STATUS_FAILED = 'failed'
+
+    PLAN_STATUS_CHOICES = [
+        (PLAN_STATUS_PLANNING, '规划中'),
+        (PLAN_STATUS_IN_PROGRESS, '进行中'),
+        (PLAN_STATUS_COMPLETED, '已完成'),
+        (PLAN_STATUS_CANCELLED, '已取消'),
+        (PLAN_STATUS_FAILED, '试制失败'),
+    ]
+
+    TRIAL_TYPE_BENCH = 'bench'
+    TRIAL_TYPE_FIELD = 'field'
+    TRIAL_TYPE_FULL = 'full'
+
+    TRIAL_TYPE_CHOICES = [
+        (TRIAL_TYPE_BENCH, '台架测试'),
+        (TRIAL_TYPE_FIELD, '现场测试'),
+        (TRIAL_TYPE_FULL, '完整试制'),
+    ]
+
+    plan_code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name='试制编号'
+    )
+    plan_name = models.CharField(
+        max_length=200,
+        verbose_name='试制方案名称'
+    )
+    recipe = models.ForeignKey(
+        ProcessRecipe,
+        on_delete=models.CASCADE,
+        related_name='trials',
+        verbose_name='关联配方'
+    )
+    material_batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='trial_plans',
+        verbose_name='关联材料批次'
+    )
+    trial_type = models.CharField(
+        max_length=20,
+        choices=TRIAL_TYPE_CHOICES,
+        default=TRIAL_TYPE_BENCH,
+        verbose_name='试制类型'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=PLAN_STATUS_CHOICES,
+        default=PLAN_STATUS_PLANNING,
+        verbose_name='试制状态'
+    )
+    target_bow_type = models.ForeignKey(
+        BowType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='trial_plans',
+        verbose_name='测试弓型'
+    )
+    sample_count = models.IntegerField(
+        default=1,
+        verbose_name='试样数量',
+        help_text='本次试制的试样数量'
+    )
+    planned_start_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='计划开始日期'
+    )
+    planned_end_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='计划完成日期'
+    )
+    actual_start_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='实际开始日期'
+    )
+    actual_end_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='实际完成日期'
+    )
+    tester = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='试制人员'
+    )
+    test_environment = models.TextField(
+        blank=True,
+        verbose_name='测试环境',
+        help_text='温度、湿度等环境条件描述'
+    )
+    preparation_notes = models.TextField(
+        blank=True,
+        verbose_name='准备工作说明'
+    )
+    test_procedure = models.TextField(
+        blank=True,
+        verbose_name='测试步骤'
+    )
+    expected_outcomes = models.TextField(
+        blank=True,
+        verbose_name='预期结果'
+    )
+    created_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='创建人'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='更新时间'
+    )
+
+    class Meta:
+        verbose_name = '试制方案'
+        verbose_name_plural = '试制方案'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.plan_code} - {self.plan_name}'
+
+    def clean(self):
+        if self.sample_count is not None and self.sample_count <= 0:
+            raise ValidationError({'sample_count': '试样数量必须大于0'})
+        if self.planned_start_date and self.planned_end_date:
+            if self.planned_start_date > self.planned_end_date:
+                raise ValidationError({'planned_start_date': '计划开始日期不能晚于计划完成日期'})
+        if self.actual_start_date and self.actual_end_date:
+            if self.actual_start_date > self.actual_end_date:
+                raise ValidationError({'actual_start_date': '实际开始日期不能晚于实际完成日期'})
+        super().clean()
+
+    @property
+    def result_count(self):
+        return self.results.count()
+
+    @property
+    def latest_result(self):
+        return self.results.order_by('-test_date').first()
+
+    @property
+    def duration_days(self):
+        if self.actual_start_date and self.actual_end_date:
+            return (self.actual_end_date - self.actual_start_date).days
+        if self.planned_start_date and self.planned_end_date:
+            return (self.planned_end_date - self.planned_start_date).days
+        return None
+
+    def start(self):
+        self.status = self.PLAN_STATUS_IN_PROGRESS
+        self.actual_start_date = timezone.now().date()
+        self.save()
+
+    def complete(self):
+        self.status = self.PLAN_STATUS_COMPLETED
+        self.actual_end_date = timezone.now().date()
+        self.save()
+
+
+class TrialResult(models.Model):
+    RISK_LEVEL_LOW = 'low'
+    RISK_LEVEL_MEDIUM = 'medium'
+    RISK_LEVEL_HIGH = 'high'
+    RISK_LEVEL_CRITICAL = 'critical'
+
+    RISK_LEVEL_CHOICES = [
+        (RISK_LEVEL_LOW, '低风险'),
+        (RISK_LEVEL_MEDIUM, '中风险'),
+        (RISK_LEVEL_HIGH, '高风险'),
+        (RISK_LEVEL_CRITICAL, '极高风险'),
+    ]
+
+    RESULT_PASS = 'pass'
+    RESULT_PARTIAL = 'partial'
+    RESULT_FAIL = 'fail'
+    RESULT_PENDING = 'pending'
+
+    RESULT_CHOICES = [
+        (RESULT_PASS, '全部通过'),
+        (RESULT_PARTIAL, '部分通过'),
+        (RESULT_FAIL, '未通过'),
+        (RESULT_PENDING, '待评估'),
+    ]
+
+    trial_plan = models.ForeignKey(
+        TrialPlan,
+        on_delete=models.CASCADE,
+        related_name='results',
+        verbose_name='所属试制方案'
+    )
+    sample_id = models.CharField(
+        max_length=50,
+        verbose_name='试样编号'
+    )
+    test_date = models.DateField(
+        default=timezone.now,
+        verbose_name='测试日期'
+    )
+    test_operator = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='测试人员'
+    )
+
+    durability_score = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='耐久性评分(0-100)',
+        help_text='基于疲劳和拉伸测试的耐久性综合评分'
+    )
+    stability_score = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='稳定性评分(0-100)',
+        help_text='基于数据一致性和回弹稳定性的评分'
+    )
+    rebound_performance = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='回弹表现评分(0-100)',
+        help_text='回弹率和回弹速度综合评分'
+    )
+    strength_score = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='强度评分(0-100)',
+        help_text='抗拉强度和断裂强度评分'
+    )
+    overall_score = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='综合评分(0-100)'
+    )
+    risk_level = models.CharField(
+        max_length=20,
+        choices=RISK_LEVEL_CHOICES,
+        default=RISK_LEVEL_LOW,
+        verbose_name='风险等级'
+    )
+    risk_score = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='风险指数(0-100)',
+        help_text='越高风险越大'
+    )
+
+    measured_force = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='实测最大拉力(N)'
+    )
+    measured_elongation = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='实测断裂伸长量(mm)'
+    )
+    measured_rebound_rate = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='实测回弹率(%)'
+    )
+    fatigue_cycles = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='疲劳循环次数'
+    )
+    measured_diameter = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='实测直径(mm)'
+    )
+    weight_per_meter = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='每米重量(g/m)'
+    )
+
+    lifespan_estimate_hours = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='预估寿命(小时)'
+    )
+    estimated_shots = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='预估射箭次数'
+    )
+
+    result_status = models.CharField(
+        max_length=20,
+        choices=RESULT_CHOICES,
+        default=RESULT_PENDING,
+        verbose_name='目标达成情况'
+    )
+    targets_met = models.JSONField(
+        default=list,
+        verbose_name='达成的目标列表'
+    )
+    targets_missed = models.JSONField(
+        default=list,
+        verbose_name='未达成的目标列表'
+    )
+
+    is_broken = models.BooleanField(
+        default=False,
+        verbose_name='是否断裂'
+    )
+    break_location = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='断裂位置'
+    )
+    break_mode = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='断裂模式',
+        help_text='如脆性断裂、韧性断裂等'
+    )
+    break_reason = models.TextField(
+        blank=True,
+        verbose_name='断裂原因分析'
+    )
+
+    observations = models.TextField(
+        blank=True,
+        verbose_name='测试观察'
+    )
+    issues_found = models.TextField(
+        blank=True,
+        verbose_name='发现的问题'
+    )
+    recommendations = models.TextField(
+        blank=True,
+        verbose_name='改进建议'
+    )
+    raw_data_reference = models.CharField(
+        max_length=500,
+        blank=True,
+        verbose_name='原始数据引用'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='备注'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='记录时间'
+    )
+
+    class Meta:
+        verbose_name = '试制结果'
+        verbose_name_plural = '试制结果'
+        ordering = ['-test_date']
+        unique_together = [['trial_plan', 'sample_id']]
+
+    def __str__(self):
+        return f'{self.trial_plan.plan_code} - {self.sample_id}'
+
+    def clean(self):
+        for field_name in ['durability_score', 'stability_score', 'rebound_performance', 'strength_score', 'overall_score', 'risk_score']:
+            value = getattr(self, field_name)
+            if value is not None and (value < 0 or value > 100):
+                raise ValidationError({field_name: '评分必须在0-100之间'})
+        for field_name in ['measured_force', 'measured_elongation', 'fatigue_cycles', 'measured_diameter', 'weight_per_meter']:
+            value = getattr(self, field_name)
+            if value is not None and value < 0:
+                raise ValidationError({field_name: '测量值不能为负数'})
+        if self.measured_rebound_rate is not None and (self.measured_rebound_rate < 0 or self.measured_rebound_rate > 100):
+            raise ValidationError({'measured_rebound_rate': '回弹率必须在0-100之间'})
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        if self.overall_score is None:
+            scores = []
+            for s in [self.durability_score, self.stability_score, self.rebound_performance, self.strength_score]:
+                if s is not None:
+                    scores.append(s)
+            if scores:
+                self.overall_score = round(sum(scores) / len(scores), 2)
+
+        if self.risk_score is None and self.risk_level:
+            risk_mapping = {
+                self.RISK_LEVEL_LOW: 20,
+                self.RISK_LEVEL_MEDIUM: 50,
+                self.RISK_LEVEL_HIGH: 75,
+                self.RISK_LEVEL_CRITICAL: 95,
+            }
+            self.risk_score = risk_mapping.get(self.risk_level, 50)
+        elif self.risk_score is not None and not self.risk_level:
+            if self.risk_score < 30:
+                self.risk_level = self.RISK_LEVEL_LOW
+            elif self.risk_score < 60:
+                self.risk_level = self.RISK_LEVEL_MEDIUM
+            elif self.risk_score < 85:
+                self.risk_level = self.RISK_LEVEL_HIGH
+            else:
+                self.risk_level = self.RISK_LEVEL_CRITICAL
+
+        super().save(*args, **kwargs)
+
+    def evaluate_targets(self):
+        recipe = self.trial_plan.recipe
+        targets = recipe.performance_targets.all()
+        met = []
+        missed = []
+
+        value_mapping = {
+            'durability': self.durability_score,
+            'stability': self.stability_score,
+            'rebound': self.rebound_performance,
+            'strength': self.strength_score,
+            'lifespan': self.lifespan_estimate_hours,
+        }
+
+        for target in targets:
+            actual_value = value_mapping.get(target.target_category)
+            if actual_value is not None:
+                result = target.evaluate(actual_value)
+                target_info = {
+                    'id': target.id,
+                    'name': target.target_name,
+                    'category': target.target_category,
+                    'target': target.target_value,
+                    'unit': target.target_unit,
+                    'actual': actual_value,
+                    'mandatory': target.is_mandatory,
+                }
+                if result:
+                    met.append(target_info)
+                else:
+                    missed.append(target_info)
+
+        self.targets_met = met
+        self.targets_missed = missed
+
+        mandatory_missed = [t for t in missed if t.get('mandatory')]
+        if not missed:
+            self.result_status = self.RESULT_PASS
+        elif not mandatory_missed:
+            self.result_status = self.RESULT_PARTIAL
+        else:
+            self.result_status = self.RESULT_FAIL
+
+        return met, missed
+
+    @property
+    def risk_color_class(self):
+        mapping = {
+            self.RISK_LEVEL_LOW: 'badge-success',
+            self.RISK_LEVEL_MEDIUM: 'badge-warning',
+            self.RISK_LEVEL_HIGH: 'badge-danger',
+            self.RISK_LEVEL_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.risk_level, 'badge-gray')
+
+    @property
+    def result_color_class(self):
+        mapping = {
+            self.RESULT_PASS: 'badge-success',
+            self.RESULT_PARTIAL: 'badge-info',
+            self.RESULT_FAIL: 'badge-danger',
+            self.RESULT_PENDING: 'badge-secondary',
+        }
+        return mapping.get(self.result_status, 'badge-gray')
+
+    def get_performance_dict(self):
+        return {
+            'durability': self.durability_score,
+            'stability': self.stability_score,
+            'rebound': self.rebound_performance,
+            'strength': self.strength_score,
+            'overall': self.overall_score,
+            'risk_level': self.risk_level,
+            'risk_score': self.risk_score,
+        }
+
+
+class RecipePrediction(models.Model):
+    RISK_LEVEL_LOW = 'low'
+    RISK_LEVEL_MEDIUM = 'medium'
+    RISK_LEVEL_HIGH = 'high'
+    RISK_LEVEL_CRITICAL = 'critical'
+
+    RISK_LEVEL_CHOICES = [
+        (RISK_LEVEL_LOW, '低风险'),
+        (RISK_LEVEL_MEDIUM, '中风险'),
+        (RISK_LEVEL_HIGH, '高风险'),
+        (RISK_LEVEL_CRITICAL, '极高风险'),
+    ]
+
+    recipe = models.ForeignKey(
+        ProcessRecipe,
+        on_delete=models.CASCADE,
+        related_name='predictions',
+        verbose_name='所属配方'
+    )
+    predicted_durability = models.FloatField(
+        verbose_name='预测耐久性评分(0-100)'
+    )
+    predicted_stability = models.FloatField(
+        verbose_name='预测稳定性评分(0-100)'
+    )
+    predicted_rebound = models.FloatField(
+        verbose_name='预测回弹表现(0-100)'
+    )
+    predicted_strength = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='预测强度评分(0-100)'
+    )
+    predicted_overall = models.FloatField(
+        verbose_name='预测综合评分(0-100)'
+    )
+    predicted_risk_level = models.CharField(
+        max_length=20,
+        choices=RISK_LEVEL_CHOICES,
+        verbose_name='预测风险等级'
+    )
+    predicted_risk_score = models.FloatField(
+        verbose_name='预测风险指数(0-100)'
+    )
+    predicted_lifespan_hours = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='预测寿命(小时)'
+    )
+    confidence_level = models.FloatField(
+        default=0.7,
+        verbose_name='置信度(0-1)',
+        help_text='预测结果的置信度'
+    )
+    key_factors = models.JSONField(
+        default=list,
+        verbose_name='关键影响因素'
+    )
+    strength_analysis = models.JSONField(
+        default=list,
+        verbose_name='优势分析'
+    )
+    weakness_analysis = models.JSONField(
+        default=list,
+        verbose_name='劣势分析'
+    )
+    optimization_suggestions = models.JSONField(
+        default=list,
+        verbose_name='优化建议'
+    )
+    prediction_method = models.CharField(
+        max_length=100,
+        default='rule_based',
+        verbose_name='预测方法'
+    )
+    reference_trials = models.JSONField(
+        default=list,
+        verbose_name='参考试制记录'
+    )
+    predicted_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='预测时间'
+    )
+    is_latest = models.BooleanField(
+        default=True,
+        verbose_name='是否为最新预测'
+    )
+
+    class Meta:
+        verbose_name = '配方性能预测'
+        verbose_name_plural = '配方性能预测'
+        ordering = ['-predicted_at']
+
+    def __str__(self):
+        return f'{self.recipe.recipe_code} - 综合:{self.predicted_overall:.1f} - {self.get_predicted_risk_level_display()}'
+
+    def save(self, *args, **kwargs):
+        if self.is_latest:
+            RecipePrediction.objects.filter(
+                recipe=self.recipe,
+                is_latest=True
+            ).exclude(pk=self.pk).update(is_latest=False)
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        for field in ['predicted_durability', 'predicted_stability', 'predicted_rebound',
+                      'predicted_strength', 'predicted_overall', 'predicted_risk_score']:
+            value = getattr(self, field)
+            if value is not None and (value < 0 or value > 100):
+                raise ValidationError({field: '预测评分必须在0-100之间'})
+        if self.confidence_level < 0 or self.confidence_level > 1:
+            raise ValidationError({'confidence_level': '置信度必须在0-1之间'})
+        super().clean()
+
+    @property
+    def risk_color_class(self):
+        mapping = {
+            self.RISK_LEVEL_LOW: 'badge-success',
+            self.RISK_LEVEL_MEDIUM: 'badge-warning',
+            self.RISK_LEVEL_HIGH: 'badge-danger',
+            self.RISK_LEVEL_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.predicted_risk_level, 'badge-gray')
+
+    def get_prediction_dict(self):
+        return {
+            'durability': self.predicted_durability,
+            'stability': self.predicted_stability,
+            'rebound': self.predicted_rebound,
+            'strength': self.predicted_strength,
+            'overall': self.predicted_overall,
+            'risk_level': self.predicted_risk_level,
+            'risk_score': self.predicted_risk_score,
+            'lifespan_hours': self.predicted_lifespan_hours,
+            'confidence': self.confidence_level,
+        }
+
+
+class RecipeComparison(models.Model):
+    COMPARISON_TYPE_PERFORMANCE = 'performance'
+    COMPARISON_TYPE_PARAMS = 'params'
+    COMPARISON_TYPE_FULL = 'full'
+
+    COMPARISON_TYPE_CHOICES = [
+        (COMPARISON_TYPE_PERFORMANCE, '性能对比'),
+        (COMPARISON_TYPE_PARAMS, '参数对比'),
+        (COMPARISON_TYPE_FULL, '综合对比'),
+    ]
+
+    name = models.CharField(
+        max_length=200,
+        verbose_name='对比名称'
+    )
+    comparison_type = models.CharField(
+        max_length=30,
+        choices=COMPARISON_TYPE_CHOICES,
+        default=COMPARISON_TYPE_FULL,
+        verbose_name='对比类型'
+    )
+    recipes = models.ManyToManyField(
+        ProcessRecipe,
+        related_name='comparisons',
+        verbose_name='参与对比的配方'
+    )
+    metrics = models.JSONField(
+        default=list,
+        verbose_name='对比指标列表'
+    )
+    reference_recipe_id = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='参照配方ID'
+    )
+    visualization_config = models.JSONField(
+        default=dict,
+        verbose_name='可视化配置'
+    )
+    created_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='创建人'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+
+    class Meta:
+        verbose_name = '配方对比分析'
+        verbose_name_plural = '配方对比分析'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.get_comparison_type_display()})'
+
+    @property
+    def recipe_count(self):
+        return self.recipes.count()
+
+    def generate_comparison_data(self):
+        recipes = self.recipes.all()
+        data = {
+            'recipes': [],
+            'metrics_summary': {},
+        }
+
+        for recipe in recipes:
+            recipe_data = {
+                'id': recipe.id,
+                'code': recipe.recipe_code,
+                'name': recipe.recipe_name,
+                'type': recipe.get_recipe_type_display(),
+                'status': recipe.get_status_display(),
+                'params': recipe.get_param_dict(),
+            }
+
+            prediction = recipe.latest_prediction
+            if prediction:
+                recipe_data['prediction'] = prediction.get_prediction_dict()
+
+            performance = recipe.get_performance_summary()
+            if performance:
+                recipe_data['actual_performance'] = performance
+
+            data['recipes'].append(recipe_data)
+
+        return data
+
+
+class OptimizationSuggestion(models.Model):
+    SEVERITY_LOW = 'low'
+    SEVERITY_MEDIUM = 'medium'
+    SEVERITY_HIGH = 'high'
+    SEVERITY_CRITICAL = 'critical'
+
+    SEVERITY_CHOICES = [
+        (SEVERITY_LOW, '低'),
+        (SEVERITY_MEDIUM, '中'),
+        (SEVERITY_HIGH, '高'),
+        (SEVERITY_CRITICAL, '关键'),
+    ]
+
+    CATEGORY_PARAMETER = 'parameter'
+    CATEGORY_MATERIAL = 'material'
+    CATEGORY_PROCESS = 'process'
+    CATEGORY_TESTING = 'testing'
+    CATEGORY_OTHER = 'other'
+
+    CATEGORY_CHOICES = [
+        (CATEGORY_PARAMETER, '参数调整'),
+        (CATEGORY_MATERIAL, '材料更换'),
+        (CATEGORY_PROCESS, '工艺改进'),
+        (CATEGORY_TESTING, '测试优化'),
+        (CATEGORY_OTHER, '其他'),
+    ]
+
+    STATUS_PENDING = 'pending'
+    STATUS_ACCEPTED = 'accepted'
+    STATUS_REJECTED = 'rejected'
+    STATUS_IMPLEMENTED = 'implemented'
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, '待处理'),
+        (STATUS_ACCEPTED, '已采纳'),
+        (STATUS_REJECTED, '已拒绝'),
+        (STATUS_IMPLEMENTED, '已实施'),
+    ]
+
+    recipe = models.ForeignKey(
+        ProcessRecipe,
+        on_delete=models.CASCADE,
+        related_name='suggestions',
+        verbose_name='所属配方'
+    )
+    trial_result = models.ForeignKey(
+        TrialResult,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='suggestions',
+        verbose_name='关联试制结果'
+    )
+    title = models.CharField(
+        max_length=200,
+        verbose_name='建议标题'
+    )
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default=CATEGORY_PARAMETER,
+        verbose_name='建议类别'
+    )
+    severity = models.CharField(
+        max_length=20,
+        choices=SEVERITY_CHOICES,
+        default=SEVERITY_MEDIUM,
+        verbose_name='重要程度'
+    )
+    description = models.TextField(
+        verbose_name='建议详情'
+    )
+    current_state = models.TextField(
+        blank=True,
+        verbose_name='当前状态描述'
+    )
+    suggested_action = models.TextField(
+        blank=True,
+        verbose_name='建议操作'
+    )
+    expected_improvement = models.JSONField(
+        default=dict,
+        verbose_name='预期改善效果',
+        help_text='如 {"durability": 10, "stability": 5} 表示各指标预期提升百分比'
+    )
+    affected_params = models.JSONField(
+        default=list,
+        verbose_name='受影响的参数'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        verbose_name='处理状态'
+    )
+    reviewer_notes = models.TextField(
+        blank=True,
+        verbose_name='审核备注'
+    )
+    reviewed_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='审核人'
+    )
+    reviewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='审核时间'
+    )
+    generated_by = models.CharField(
+        max_length=100,
+        default='system',
+        verbose_name='生成者'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+
+    class Meta:
+        verbose_name = '优化建议'
+        verbose_name_plural = '优化建议'
+        ordering = ['-severity', '-created_at']
+
+    def __str__(self):
+        return f'{self.recipe.recipe_code} - {self.title}'
+
+    @property
+    def severity_color_class(self):
+        mapping = {
+            self.SEVERITY_LOW: 'badge-info',
+            self.SEVERITY_MEDIUM: 'badge-warning',
+            self.SEVERITY_HIGH: 'badge-danger',
+            self.SEVERITY_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.severity, 'badge-gray')
+
+    @property
+    def status_color_class(self):
+        mapping = {
+            self.STATUS_PENDING: 'badge-secondary',
+            self.STATUS_ACCEPTED: 'badge-info',
+            self.STATUS_REJECTED: 'badge-light',
+            self.STATUS_IMPLEMENTED: 'badge-success',
+        }
+        return mapping.get(self.status, 'badge-gray')
+
+    def accept(self, reviewer='', notes=''):
+        self.status = self.STATUS_ACCEPTED
+        self.reviewed_by = reviewer
+        self.reviewed_at = timezone.now()
+        self.reviewer_notes = notes
+        self.save()
+
+    def reject(self, reviewer='', notes=''):
+        self.status = self.STATUS_REJECTED
+        self.reviewed_by = reviewer
+        self.reviewed_at = timezone.now()
+        self.reviewer_notes = notes
+        self.save()
+
+    def mark_implemented(self, reviewer='', notes=''):
+        self.status = self.STATUS_IMPLEMENTED
+        self.reviewed_by = reviewer
+        self.reviewed_at = timezone.now()
+        if notes:
+            self.reviewer_notes = notes
+        self.save()

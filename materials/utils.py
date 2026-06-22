@@ -1290,3 +1290,762 @@ class BatchRanker:
             ranking_type=ranking_type
         ).select_related('batch').order_by('rank')
         return list(qs[:limit])
+
+
+class RecipePredictor:
+    WEIGHT_DURABILITY = 0.30
+    WEIGHT_STABILITY = 0.25
+    WEIGHT_REBOUND = 0.20
+    WEIGHT_STRENGTH = 0.25
+
+    BENCHMARK_TWIST = 120
+    BENCHMARK_STRAND = 16
+    BENCHMARK_CURING_TEMP = 60
+    BENCHMARK_CURING_HOURS = 24
+
+    def __init__(self, recipe):
+        self.recipe = recipe
+        self.analyzer = StatisticsAnalyzer()
+
+    def _evaluate_twist_factor(self):
+        score = 50.0
+        factors = []
+        if self.recipe.twist_count is None:
+            return 50.0, ['捻度未设置，使用基准值评估']
+        diff = abs(self.recipe.twist_count - self.BENCHMARK_TWIST)
+        ratio = 1.0 - min(diff / self.BENCHMARK_TWIST, 1.0)
+        twist_score = ratio * 50
+        score += twist_score
+        if self.recipe.twist_count < self.BENCHMARK_TWIST * 0.7:
+            factors.append(f'捻度{self.recipe.twist_count}偏低，可能降低耐久性')
+        elif self.recipe.twist_count > self.BENCHMARK_TWIST * 1.3:
+            factors.append(f'捻度{self.recipe.twist_count}偏高，可能影响回弹')
+        else:
+            factors.append(f'捻度{self.recipe.twist_count}处于合理范围')
+        return min(score, 100), factors
+
+    def _evaluate_strand_factor(self):
+        score = 50.0
+        factors = []
+        if self.recipe.strand_count is None:
+            return 50.0, ['股数未设置，使用基准值评估']
+        diff = abs(self.recipe.strand_count - self.BENCHMARK_STRAND)
+        ratio = 1.0 - min(diff / self.BENCHMARK_STRAND, 1.0)
+        strand_score = ratio * 50
+        score += strand_score
+        if self.recipe.strand_count < self.BENCHMARK_STRAND * 0.6:
+            factors.append(f'股数{self.recipe.strand_count}偏少，强度可能不足')
+        elif self.recipe.strand_count > self.BENCHMARK_STRAND * 1.5:
+            factors.append(f'股数{self.recipe.strand_count}偏多，可能降低回弹速度')
+        else:
+            factors.append(f'股数{self.recipe.strand_count}配置合理')
+        return min(score, 100), factors
+
+    def _evaluate_curing_factor(self):
+        score = 50.0
+        factors = []
+        temp_ok = False
+        dur_ok = False
+        if self.recipe.curing_temperature is not None:
+            temp_diff = abs(self.recipe.curing_temperature - self.BENCHMARK_CURING_TEMP)
+            temp_ratio = 1.0 - min(temp_diff / self.BENCHMARK_CURING_TEMP, 1.0)
+            score += temp_ratio * 25
+            if 40 <= self.recipe.curing_temperature <= 80:
+                temp_ok = True
+                factors.append(f'固化温度{self.recipe.curing_temperature}°C合理')
+            else:
+                factors.append(f'固化温度{self.recipe.curing_temperature}°C偏离推荐范围')
+        if self.recipe.curing_duration is not None:
+            dur_diff = abs(self.recipe.curing_duration - self.BENCHMARK_CURING_HOURS)
+            dur_ratio = 1.0 - min(dur_diff / self.BENCHMARK_CURING_HOURS, 1.0)
+            score += dur_ratio * 25
+            if 12 <= self.recipe.curing_duration <= 48:
+                dur_ok = True
+                factors.append(f'固化时间{self.recipe.curing_duration}h合理')
+            else:
+                factors.append(f'固化时间{self.recipe.curing_duration}h偏离推荐范围')
+        if temp_ok and dur_ok:
+            factors.append('固化工艺配置良好')
+        return min(score, 100), factors
+
+    def _evaluate_material_factor(self):
+        score = 50.0
+        factors = []
+        if not self.recipe.base_material:
+            return 50.0, ['基础材料未指定']
+        premium_materials = ['蚕丝', '凯夫拉', 'dyneema', 'spectra', '超高分子量聚乙烯']
+        mid_materials = ['麻', '尼龙', '涤纶']
+        material_lower = self.recipe.base_material.lower()
+        matched = False
+        for m in premium_materials:
+            if m.lower() in material_lower:
+                score = 90.0
+                factors.append(f'基础材料{self.recipe.base_material}为高性能材料')
+                matched = True
+                break
+        if not matched:
+            for m in mid_materials:
+                if m.lower() in material_lower:
+                    score = 70.0
+                    factors.append(f'基础材料{self.recipe.base_material}为中等性能材料')
+                    matched = True
+                    break
+        if not matched:
+            factors.append(f'基础材料{self.recipe.base_material}性能待验证')
+        return min(score, 100), factors
+
+    def _evaluate_process_params(self):
+        score = 50.0
+        factors = []
+        critical_params = self.recipe.params.filter(is_critical=True)
+        if critical_params.exists():
+            param_scores = []
+            for p in critical_params:
+                if p.min_value is not None and p.max_value is not None and p.max_value > p.min_value:
+                    mid = (p.min_value + p.max_value) / 2
+                    span = p.max_value - p.min_value
+                    if span > 0:
+                        deviation = abs(p.param_value - mid) / (span / 2)
+                        p_score = max(0, (1.0 - deviation) * 100)
+                        param_scores.append(p_score)
+                        if deviation < 0.2:
+                            factors.append(f'关键参数{p.param_name}={p.param_value}处于最佳区间')
+                        elif deviation < 0.5:
+                            factors.append(f'关键参数{p.param_name}={p.param_value}偏离最优值')
+                        else:
+                            factors.append(f'关键参数{p.param_name}={p.param_value}偏离较大')
+            if param_scores:
+                avg_param = sum(param_scores) / len(param_scores)
+                score = avg_param * 0.5 + 50
+        return min(score, 100), factors
+
+    def _evaluate_reference_trials(self):
+        trial_results = TrialResult.objects.filter(
+            trial_plan__recipe=self.recipe
+        )
+        if not trial_results.exists():
+            return None, [], []
+        durabilities = list(trial_results.filter(durability_score__isnull=False).values_list('durability_score', flat=True))
+        stabilities = list(trial_results.filter(stability_score__isnull=False).values_list('stability_score', flat=True))
+        rebounds = list(trial_results.filter(rebound_performance__isnull=False).values_list('rebound_performance', flat=True))
+        strengths = list(trial_results.filter(strength_score__isnull=False).values_list('strength_score', flat=True))
+        reference = []
+        for tr in trial_results[:5]:
+            reference.append({
+                'trial_code': tr.trial_plan.plan_code,
+                'sample': tr.sample_id,
+                'overall': tr.overall_score,
+                'risk_level': tr.risk_level,
+            })
+        avg_data = {
+            'durability': round(sum(durabilities) / len(durabilities), 1) if durabilities else None,
+            'stability': round(sum(stabilities) / len(stabilities), 1) if stabilities else None,
+            'rebound': round(sum(rebounds) / len(rebounds), 1) if rebounds else None,
+            'strength': round(sum(strengths) / len(strengths), 1) if strengths else None,
+            'trial_count': trial_results.count(),
+        }
+        return avg_data, reference, ['基于' + str(trial_results.count()) + '次历史试制数据评估']
+
+    def predict(self):
+        all_factors = []
+        strengths = []
+        weaknesses = []
+        ref_data, refs, ref_factors = self._evaluate_reference_trials()
+        all_factors.extend(ref_factors)
+
+        twist_score, twist_factors = self._evaluate_twist_factor()
+        strand_score, strand_factors = self._evaluate_strand_factor()
+        curing_score, curing_factors = self._evaluate_curing_factor()
+        material_score, material_factors = self._evaluate_material_factor()
+        param_score, param_factors = self._evaluate_process_params()
+
+        all_factors.extend(twist_factors + strand_factors + curing_factors + material_factors + param_factors)
+
+        if ref_data:
+            predicted_durability = round(ref_data.get('durability') or (
+                twist_score * 0.35 + strand_score * 0.35 + curing_score * 0.15 + material_score * 0.15
+            ), 1)
+            predicted_stability = round(ref_data.get('stability') or (
+                twist_score * 0.25 + param_score * 0.35 + curing_score * 0.20 + material_score * 0.20
+            ), 1)
+            predicted_rebound = round(ref_data.get('rebound') or (
+                twist_score * 0.40 + strand_score * 0.25 + material_score * 0.20 + param_score * 0.15
+            ), 1)
+            predicted_strength = round(ref_data.get('strength') or (
+                strand_score * 0.40 + material_score * 0.35 + twist_score * 0.15 + curing_score * 0.10
+            ), 1)
+        else:
+            predicted_durability = round(
+                twist_score * 0.35 + strand_score * 0.35 + curing_score * 0.15 + material_score * 0.15, 1
+            )
+            predicted_stability = round(
+                twist_score * 0.25 + param_score * 0.35 + curing_score * 0.20 + material_score * 0.20, 1
+            )
+            predicted_rebound = round(
+                twist_score * 0.40 + strand_score * 0.25 + material_score * 0.20 + param_score * 0.15, 1
+            )
+            predicted_strength = round(
+                strand_score * 0.40 + material_score * 0.35 + twist_score * 0.15 + curing_score * 0.10, 1
+            )
+
+        predicted_overall = round(
+            predicted_durability * self.WEIGHT_DURABILITY
+            + predicted_stability * self.WEIGHT_STABILITY
+            + predicted_rebound * self.WEIGHT_REBOUND
+            + predicted_strength * self.WEIGHT_STRENGTH, 1
+        )
+
+        low_scores = []
+        high_scores = []
+        for label, val in [('耐久性', predicted_durability), ('稳定性', predicted_stability),
+                           ('回弹表现', predicted_rebound), ('强度', predicted_strength)]:
+            if val >= 80:
+                high_scores.append(label)
+            elif val < 50:
+                low_scores.append(label)
+        if high_scores:
+            strengths.append('优势指标：' + '、'.join(high_scores))
+        if low_scores:
+            weaknesses.append('待改进指标：' + '、'.join(low_scores))
+
+        if twist_score >= 75:
+            strengths.append('捻度配置合理，有利于性能平衡')
+        elif twist_score < 50:
+            weaknesses.append('捻度配置需要优化')
+        if material_score >= 80:
+            strengths.append('基础材料性能优异')
+        elif material_score < 55:
+            weaknesses.append('基础材料性能有待提升，可考虑更换材料')
+        if curing_score >= 70:
+            strengths.append('固化工艺参数配置良好')
+        elif curing_score < 50:
+            weaknesses.append('固化工艺需要优化温度或时长')
+        if param_score >= 75 and self.recipe.params.filter(is_critical=True).exists():
+            strengths.append('关键工艺参数控制精准')
+        elif param_score < 50 and self.recipe.params.filter(is_critical=True).exists():
+            weaknesses.append('关键工艺参数偏离最优区间')
+
+        predicted_risk_score = round(max(0, 100 - predicted_overall), 1)
+        if predicted_risk_score >= 75:
+            predicted_risk_level = RecipePrediction.RISK_LEVEL_CRITICAL
+        elif predicted_risk_score >= 50:
+            predicted_risk_level = RecipePrediction.RISK_LEVEL_HIGH
+        elif predicted_risk_score >= 25:
+            predicted_risk_level = RecipePrediction.RISK_LEVEL_MEDIUM
+        else:
+            predicted_risk_level = RecipePrediction.RISK_LEVEL_LOW
+
+        optimization_suggestions = self._generate_optimization_suggestions(
+            predicted_durability, predicted_stability, predicted_rebound, predicted_strength,
+            twist_score, strand_score, curing_score, material_score, param_score, weaknesses
+        )
+
+        predicted_lifespan = None
+        if predicted_overall > 0:
+            base_hours = 200
+            predicted_lifespan = round(base_hours * (predicted_overall / 100) * 1.5, 1)
+
+        confidence = 0.5
+        if ref_data and ref_data.get('trial_count', 0) >= 3:
+            confidence = 0.85
+        elif ref_data and ref_data.get('trial_count', 0) >= 1:
+            confidence = 0.7
+        elif self.recipe.params.count() >= 5:
+            confidence = 0.6
+
+        prediction = RecipePrediction.objects.create(
+            recipe=self.recipe,
+            predicted_durability=predicted_durability,
+            predicted_stability=predicted_stability,
+            predicted_rebound=predicted_rebound,
+            predicted_strength=predicted_strength,
+            predicted_overall=predicted_overall,
+            predicted_risk_level=predicted_risk_level,
+            predicted_risk_score=predicted_risk_score,
+            predicted_lifespan_hours=predicted_lifespan,
+            confidence_level=confidence,
+            key_factors=all_factors,
+            strength_analysis=strengths,
+            weakness_analysis=weaknesses,
+            optimization_suggestions=optimization_suggestions,
+            prediction_method='hybrid_rule_and_history_based',
+            reference_trials=refs,
+        )
+        return {
+            'prediction': prediction,
+            'component_scores': {
+                'twist': twist_score,
+                'strand': strand_score,
+                'curing': curing_score,
+                'material': material_score,
+                'params': param_score,
+            },
+            'reference_data': ref_data,
+        }
+
+    def _generate_optimization_suggestions(self, dur, stab, reb, str_, twist, strand, curing, material, params, weaknesses):
+        suggestions = []
+        if dur < 60:
+            if twist < 60:
+                suggestions.append({
+                    'category': 'parameter',
+                    'severity': 'high' if dur < 45 else 'medium',
+                    'title': '优化捻度配置提升耐久性',
+                    'description': f'当前捻度评分{twist:.1f}偏低，建议调整捻度至{self.BENCHMARK_TWIST}±20%范围内，可提升纤维抱合力和耐磨性能。',
+                    'expected': {'durability': 10, 'stability': 5},
+                })
+            if strand < 60:
+                suggestions.append({
+                    'category': 'parameter',
+                    'severity': 'high' if strand < 45 else 'medium',
+                    'title': '调整股数配置',
+                    'description': f'当前股数评分{strand:.1f}，建议股数设置在{self.BENCHMARK_STRAND}±4股范围内，平衡强度与柔韧性。',
+                    'expected': {'durability': 8, 'strength': 12},
+                })
+        if stab < 60:
+            if curing < 60:
+                suggestions.append({
+                    'category': 'process',
+                    'severity': 'medium',
+                    'title': '优化固化工艺提升稳定性',
+                    'description': f'固化工艺评分{curing:.1f}偏低，建议温度设为{self.BENCHMARK_CURING_TEMP}°C左右，时长{self.BENCHMARK_CURING_HOURS}h，使材料结构充分稳定。',
+                    'expected': {'stability': 12, 'durability': 5},
+                })
+            if params < 60 and self.recipe.params.filter(is_critical=True).exists():
+                suggestions.append({
+                    'category': 'parameter',
+                    'severity': 'medium',
+                    'title': '校准关键工艺参数',
+                    'description': '关键工艺参数偏离最优区间，建议对照参数容差范围进行精确调整。',
+                    'expected': {'stability': 10, 'rebound': 5},
+                })
+        if reb < 60:
+            if twist < 65:
+                suggestions.append({
+                    'category': 'parameter',
+                    'severity': 'medium',
+                    'title': '微调捻度改善回弹',
+                    'description': '捻度对回弹性能影响显著，建议在保证耐久性的前提下适度调整捻度。',
+                    'expected': {'rebound': 10, 'stability': 3},
+                })
+            if self.recipe.coating_material:
+                suggestions.append({
+                    'category': 'material',
+                    'severity': 'low',
+                    'title': '优化涂层材料',
+                    'description': '可考虑使用低摩擦系数涂层材料，减少内部摩擦损耗，提升回弹效率。',
+                    'expected': {'rebound': 6},
+                })
+        if str_ < 60:
+            if material < 60:
+                suggestions.append({
+                    'category': 'material',
+                    'severity': 'high' if str_ < 45 else 'medium',
+                    'title': '考虑升级基础材料',
+                    'description': f'当前材料评分{material:.1f}，可考虑选用高强度纤维材料（如超高分子量聚乙烯、芳纶等）。',
+                    'expected': {'strength': 15, 'durability': 8},
+                })
+            if strand < 60:
+                suggestions.append({
+                    'category': 'parameter',
+                    'severity': 'medium',
+                    'title': '增加股数提升强度',
+                    'description': '在弓弦直径允许范围内适当增加股数，可有效提升整体抗拉强度。',
+                    'expected': {'strength': 10},
+                })
+        if not suggestions:
+            suggestions.append({
+                'category': 'other',
+                'severity': 'low',
+                'title': '当前配方综合表现良好',
+                'description': '各项指标均处于较好水平，建议进行小批量试制验证实际表现。',
+                'expected': {},
+            })
+        return suggestions
+
+
+class RecipeComparator:
+    def __init__(self, recipes):
+        self.recipes = recipes
+
+    def _ensure_predictions(self):
+        for recipe in self.recipes:
+            if not recipe.latest_prediction:
+                try:
+                    predictor = RecipePredictor(recipe)
+                    predictor.predict()
+                except Exception:
+                    pass
+
+    def compare_performance(self):
+        self._ensure_predictions()
+        result = {
+            'recipes': [],
+            'best_in_category': {},
+            'radar_data': {},
+            'recommendations': [],
+        }
+        categories = ['durability', 'stability', 'rebound', 'strength', 'overall']
+        cat_labels = {
+            'durability': '耐久性',
+            'stability': '稳定性',
+            'rebound': '回弹表现',
+            'strength': '强度',
+            'overall': '综合评分',
+        }
+        best_scores = {c: (None, None) for c in categories}
+        worst_risk = (None, 101)
+
+        for recipe in self.recipes:
+            pred = recipe.latest_prediction
+            perf = recipe.get_performance_summary()
+            data = {
+                'id': recipe.id,
+                'code': recipe.recipe_code,
+                'name': recipe.recipe_name,
+                'type': recipe.get_recipe_type_display(),
+                'status': recipe.get_status_display(),
+                'predicted': pred.get_prediction_dict() if pred else None,
+                'actual': perf,
+                'trial_count': recipe.trial_count,
+                'param_count': recipe.param_count,
+            }
+            if pred:
+                for c in categories:
+                    key = c if c != 'overall' else 'overall'
+                    val = getattr(pred, f'predicted_{c}', None) if c != 'overall' else pred.predicted_overall
+                    if val is not None:
+                        if best_scores[c][1] is None or val > best_scores[c][1]:
+                            best_scores[c] = (recipe.recipe_code, val)
+                if pred.predicted_risk_score < worst_risk[1]:
+                    worst_risk = (recipe.recipe_code, pred.predicted_risk_score)
+            result['recipes'].append(data)
+
+        result['best_in_category'] = {
+            cat_labels[k]: {'recipe': v[0], 'score': v[1]}
+            for k, v in best_scores.items() if v[0] is not None
+        }
+        result['lowest_risk'] = {'recipe': worst_risk[0], 'risk_score': worst_risk[1]}
+
+        radar_categories = ['durability', 'stability', 'rebound', 'strength']
+        radar_labels = [cat_labels[c] for c in radar_categories]
+        radar_datasets = []
+        for recipe in self.recipes:
+            pred = recipe.latest_prediction
+            if pred:
+                radar_datasets.append({
+                    'label': recipe.recipe_code,
+                    'data': [
+                        pred.predicted_durability,
+                        pred.predicted_stability,
+                        pred.predicted_rebound,
+                        pred.predicted_strength or 0,
+                    ],
+                })
+        result['radar_data'] = {
+            'labels': radar_labels,
+            'datasets': radar_datasets,
+        }
+
+        overall_scores = []
+        for recipe in self.recipes:
+            pred = recipe.latest_prediction
+            if pred:
+                overall_scores.append((recipe, pred.predicted_overall))
+        overall_scores.sort(key=lambda x: x[1], reverse=True)
+        if len(overall_scores) >= 2:
+            best_recipe, best_score = overall_scores[0]
+            second_recipe, second_score = overall_scores[1]
+            diff = best_score - second_score
+            if diff >= 10:
+                result['recommendations'].append(
+                    f'配方{best_recipe.recipe_code}综合评分领先{diff:.1f}分，优势明显，推荐优先试制'
+                )
+            else:
+                result['recommendations'].append(
+                    f'配方{best_recipe.recipe_code}与{second_recipe.recipe_code}综合评分接近（差距{diff:.1f}分），建议并行试制对比实际表现'
+                )
+        if result.get('lowest_risk', {}).get('recipe'):
+            low_risk_recipe = result['lowest_risk']['recipe']
+            if overall_scores and low_risk_recipe != overall_scores[0][0].recipe_code:
+                result['recommendations'].append(
+                    f'配方{low_risk_recipe}风险等级最低，适合对可靠性要求高的应用场景'
+                )
+        return result
+
+    def compare_parameters(self):
+        result = {
+            'recipes': [],
+            'param_matrix': {},
+            'differences': [],
+        }
+        all_param_names = set()
+        for recipe in self.recipes:
+            for p in recipe.params.all():
+                all_param_names.add(p.param_name)
+        core_attrs = [
+            ('base_material', '基础材料', None),
+            ('twist_count', '捻度(捻/m)', None),
+            ('strand_count', '股数', None),
+            ('coating_material', '涂层材料', None),
+            ('curing_method', '固化方式', None),
+            ('curing_temperature', '固化温度(°C)', None),
+            ('curing_duration', '固化时间(h)', None),
+            ('twist_direction', '捻向', None),
+            ('weaving_method', '编织方式', None),
+        ]
+        for attr, label, _ in core_attrs:
+            values = []
+            for recipe in self.recipes:
+                v = getattr(recipe, attr, None)
+                values.append((recipe.recipe_code, v))
+            distinct_vals = set(str(v[1]) for v in values if v[1] is not None)
+            if len(distinct_vals) > 1:
+                result['differences'].append(f'{label}存在差异：' + '、'.join(distinct_vals))
+        for recipe in self.recipes:
+            data = {
+                'id': recipe.id,
+                'code': recipe.recipe_code,
+                'name': recipe.recipe_name,
+                'core_attrs': {},
+                'params': {},
+            }
+            for attr, label, _ in core_attrs:
+                data['core_attrs'][label] = getattr(recipe, attr, None)
+            for p in recipe.params.all():
+                data['params'][p.param_name] = {
+                    'value': p.param_value,
+                    'unit': p.param_unit,
+                    'type': p.get_param_type_display(),
+                    'critical': p.is_critical,
+                }
+            result['recipes'].append(data)
+        return result
+
+    def full_comparison(self):
+        perf = self.compare_performance()
+        params = self.compare_parameters()
+        return {
+            'performance': perf,
+            'parameters': params,
+            'summary': {
+                'recipe_count': len(self.recipes),
+                'best_overall': perf.get('best_in_category', {}).get('综合评分', {}),
+                'param_differences_count': len(params.get('differences', [])),
+            },
+        }
+
+
+class OptimizationGenerator:
+    def __init__(self, recipe, trial_result=None):
+        self.recipe = recipe
+        self.trial_result = trial_result
+
+    def generate_from_prediction(self):
+        predictor = RecipePredictor(self.recipe)
+        pred_result = predictor.predict()
+        prediction = pred_result['prediction']
+        suggestions = []
+        for sug in prediction.optimization_suggestions:
+            severity_map = {
+                'critical': OptimizationSuggestion.SEVERITY_CRITICAL,
+                'high': OptimizationSuggestion.SEVERITY_HIGH,
+                'medium': OptimizationSuggestion.SEVERITY_MEDIUM,
+                'low': OptimizationSuggestion.SEVERITY_LOW,
+            }
+            category_map = {
+                'parameter': OptimizationSuggestion.CATEGORY_PARAMETER,
+                'material': OptimizationSuggestion.CATEGORY_MATERIAL,
+                'process': OptimizationSuggestion.CATEGORY_PROCESS,
+                'testing': OptimizationSuggestion.CATEGORY_TESTING,
+                'other': OptimizationSuggestion.CATEGORY_OTHER,
+            }
+            sug_obj = OptimizationSuggestion.objects.create(
+                recipe=self.recipe,
+                trial_result=self.trial_result,
+                title=sug.get('title', '优化建议'),
+                category=category_map.get(sug.get('category'), OptimizationSuggestion.CATEGORY_OTHER),
+                severity=severity_map.get(sug.get('severity'), OptimizationSuggestion.SEVERITY_MEDIUM),
+                description=sug.get('description', ''),
+                suggested_action=sug.get('description', ''),
+                expected_improvement=sug.get('expected', {}),
+                generated_by='prediction_engine',
+            )
+            suggestions.append(sug_obj)
+        return suggestions
+
+    def generate_from_trial_result(self):
+        if not self.trial_result:
+            return []
+        suggestions = []
+        tr = self.trial_result
+        targets_missed = tr.targets_missed or []
+        for tm in targets_missed:
+            category = tm.get('category', 'other')
+            actual = tm.get('actual', 0)
+            target = tm.get('target', 0)
+            gap = target - actual if tm.get('mandatory', True) else 0
+            if category == 'durability':
+                suggestions.append({
+                    'title': f'耐久性未达目标（实际{actual}，目标≥{target}）',
+                    'category': OptimizationSuggestion.CATEGORY_PARAMETER,
+                    'severity': OptimizationSuggestion.SEVERITY_HIGH if tm.get('mandatory') else OptimizationSuggestion.SEVERITY_MEDIUM,
+                    'description': f'耐久性评分{actual}低于目标{target}，差距{gap:.1f}分，建议重点优化捻度和股数配置。',
+                    'expected': {'durability': gap},
+                })
+            elif category == 'stability':
+                suggestions.append({
+                    'title': f'稳定性未达目标（实际{actual}，目标≥{target}）',
+                    'category': OptimizationSuggestion.CATEGORY_PROCESS,
+                    'severity': OptimizationSuggestion.SEVERITY_HIGH if tm.get('mandatory') else OptimizationSuggestion.SEVERITY_MEDIUM,
+                    'description': f'稳定性评分{actual}低于目标{target}，建议优化固化工艺和关键参数控制。',
+                    'expected': {'stability': gap},
+                })
+            elif category == 'rebound':
+                suggestions.append({
+                    'title': f'回弹表现未达目标（实际{actual}，目标≥{target}）',
+                    'category': OptimizationSuggestion.CATEGORY_PARAMETER,
+                    'severity': OptimizationSuggestion.SEVERITY_MEDIUM,
+                    'description': f'回弹表现{actual}低于目标{target}，可调整捻度或优化涂层材料。',
+                    'expected': {'rebound': gap},
+                })
+            elif category == 'strength':
+                suggestions.append({
+                    'title': f'强度未达目标（实际{actual}，目标≥{target}）',
+                    'category': OptimizationSuggestion.CATEGORY_MATERIAL,
+                    'severity': OptimizationSuggestion.SEVERITY_HIGH if tm.get('mandatory') else OptimizationSuggestion.SEVERITY_MEDIUM,
+                    'description': f'强度评分{actual}低于目标{target}，建议增加股数或升级材料。',
+                    'expected': {'strength': gap},
+                })
+        if tr.is_broken:
+            suggestions.append({
+                'title': '试制过程发生断裂',
+                'category': OptimizationSuggestion.CATEGORY_PROCESS,
+                'severity': OptimizationSuggestion.SEVERITY_CRITICAL,
+                'description': f'断裂位置：{tr.break_location or "未记录"}，断裂模式：{tr.break_mode or "未记录"}，原因：{tr.break_reason or "待分析"}。建议全面排查工艺参数并降低测试载荷等级。',
+                'expected': {},
+            })
+        if tr.issues_found:
+            suggestions.append({
+                'title': '解决试制中发现的问题',
+                'category': OptimizationSuggestion.CATEGORY_OTHER,
+                'severity': OptimizationSuggestion.SEVERITY_MEDIUM,
+                'description': tr.issues_found,
+                'expected': {},
+            })
+        created = []
+        for sug in suggestions:
+            sug_obj = OptimizationSuggestion.objects.create(
+                recipe=self.recipe,
+                trial_result=self.trial_result,
+                title=sug['title'],
+                category=sug['category'],
+                severity=sug['severity'],
+                description=sug['description'],
+                current_state=tr.observations or '',
+                expected_improvement=sug.get('expected', {}),
+                generated_by='trial_analysis',
+            )
+            created.append(sug_obj)
+        return created
+
+    def generate_all(self):
+        suggestions = []
+        suggestions.extend(self.generate_from_prediction())
+        if self.trial_result:
+            suggestions.extend(self.generate_from_trial_result())
+        return suggestions
+
+
+class TrialAnalyzer:
+    def __init__(self, trial_plan):
+        self.trial_plan = trial_plan
+        self.recipe = trial_plan.recipe
+
+    def analyze_results(self):
+        results = self.trial_plan.results.all()
+        if not results.exists():
+            return {'status': 'no_data', 'message': '暂无试制结果数据'}
+        analysis = {
+            'trial_plan': {
+                'code': self.trial_plan.plan_code,
+                'name': self.trial_plan.plan_name,
+                'recipe_code': self.recipe.recipe_code,
+                'sample_count': self.trial_plan.sample_count,
+                'result_count': results.count(),
+            },
+            'performance_stats': {},
+            'risk_analysis': {},
+            'target_achievement': {},
+            'consistency_analysis': {},
+            'recommendations': [],
+        }
+        perf_fields = [
+            ('durability_score', '耐久性'),
+            ('stability_score', '稳定性'),
+            ('rebound_performance', '回弹表现'),
+            ('strength_score', '强度'),
+            ('overall_score', '综合评分'),
+        ]
+        analyzer = StatisticsAnalyzer()
+        for field, label in perf_fields:
+            values = list(results.filter(**{f'{field}__isnull': False}).values_list(field, flat=True))
+            if values:
+                analysis['performance_stats'][label] = analyzer.basic_stats(values)
+        risk_counts = {}
+        risk_scores = []
+        for r in results:
+            lvl = r.get_risk_level_display()
+            risk_counts[lvl] = risk_counts.get(lvl, 0) + 1
+            if r.risk_score is not None:
+                risk_scores.append(r.risk_score)
+        analysis['risk_analysis'] = {
+            'distribution': risk_counts,
+            'avg_risk_score': round(sum(risk_scores) / len(risk_scores), 1) if risk_scores else None,
+        }
+        all_met = []
+        all_missed = []
+        pass_count = 0
+        partial_count = 0
+        fail_count = 0
+        for r in results:
+            all_met.extend(r.targets_met or [])
+            all_missed.extend(r.targets_missed or [])
+            if r.result_status == TrialResult.RESULT_PASS:
+                pass_count += 1
+            elif r.result_status == TrialResult.RESULT_PARTIAL:
+                partial_count += 1
+            elif r.result_status == TrialResult.RESULT_FAIL:
+                fail_count += 1
+        analysis['target_achievement'] = {
+            'pass_count': pass_count,
+            'partial_count': partial_count,
+            'fail_count': fail_count,
+            'total_met_count': len(all_met),
+            'total_missed_count': len(all_missed),
+            'missed_targets': all_missed[:10],
+        }
+        if results.count() >= 3:
+            consistencies = {}
+            for field, label in perf_fields:
+                values = list(results.filter(**{f'{field}__isnull': False}).values_list(field, flat=True))
+                if len(values) >= 3:
+                    mean_v = sum(values) / len(values)
+                    if mean_v > 0:
+                        var_v = sum((x - mean_v) ** 2 for x in values) / len(values)
+                        cv = math.sqrt(var_v) / mean_v
+                        consistencies[label] = {
+                            'cv': round(cv * 100, 2),
+                            'assessment': '优秀' if cv < 0.05 else '良好' if cv < 0.10 else '一般' if cv < 0.20 else '较差',
+                        }
+            analysis['consistency_analysis'] = consistencies
+        broken = results.filter(is_broken=True)
+        if broken.exists():
+            analysis['recommendations'].append(f'{broken.count()}个试样发生断裂，建议排查断裂原因并优化工艺')
+        if fail_count > 0:
+            analysis['recommendations'].append(f'{fail_count}个试样未通过目标验证，建议参考生成的优化建议调整参数')
+        if partial_count > 0 and fail_count == 0:
+            analysis['recommendations'].append(f'{partial_count}个试样部分通过目标，优化后有望全面达标')
+        if pass_count == results.count() and not broken.exists():
+            analysis['recommendations'].append('所有试样全部通过验证，表现稳定，可考虑扩大试制或批准配方')
+        return analysis

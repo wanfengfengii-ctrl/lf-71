@@ -41,4 +41,31 @@ urlpatterns = [
     path('api/bow-matching/<int:pk>/', views.ApiBowMatchingView.as_view(), name='api_bow_matching'),
     path('api/batch-ranking/', views.ApiBatchRankingView.as_view(), name='api_batch_ranking'),
     path('api/prediction-viz/<int:pk>/', views.ApiPredictionVisualizationView.as_view(), name='api_prediction_viz'),
+
+    path('recipes/', views.RecipeListView.as_view(), name='recipe_list'),
+    path('recipes/<int:pk>/', views.RecipeDetailView.as_view(), name='recipe_detail'),
+    path('recipes/create/', views.RecipeCreateView.as_view(), name='recipe_create'),
+    path('recipes/<int:pk>/edit/', views.RecipeUpdateView.as_view(), name='recipe_edit'),
+    path('recipes/<int:pk>/delete/', views.RecipeDeleteView.as_view(), name='recipe_delete'),
+    path('recipes/<int:pk>/predict/', views.RunRecipePredictionView.as_view(), name='run_recipe_prediction'),
+    path('recipes/<int:pk>/suggestions/', views.RecipeSuggestionsView.as_view(), name='recipe_suggestions'),
+    path('recipes/<int:pk>/viz/', views.ApiRecipeVisualizationView.as_view(), name='api_recipe_viz'),
+
+    path('trials/', views.TrialPlanListView.as_view(), name='trial_list'),
+    path('trials/<int:pk>/', views.TrialPlanDetailView.as_view(), name='trial_detail'),
+    path('trials/create/', views.TrialPlanCreateView.as_view(), name='trial_create'),
+    path('trials/<int:pk>/edit/', views.TrialPlanUpdateView.as_view(), name='trial_edit'),
+    path('trials/<int:pk>/start/', views.TrialPlanStartView.as_view(), name='trial_start'),
+    path('trials/<int:pk>/complete/', views.TrialPlanCompleteView.as_view(), name='trial_complete'),
+    path('trials/<int:pk>/results/add/', views.TrialResultCreateView.as_view(), name='trial_result_create'),
+    path('trial-results/<int:pk>/edit/', views.TrialResultUpdateView.as_view(), name='trial_result_edit'),
+    path('trial-results/<int:pk>/evaluate/', views.EvaluateTrialResultView.as_view(), name='trial_result_evaluate'),
+    path('trials/<int:pk>/analyze/', views.TrialAnalysisView.as_view(), name='trial_analysis'),
+
+    path('recipe-compare/', views.RecipeCompareView.as_view(), name='recipe_compare'),
+
+    path('api/recipe/<int:pk>/prediction/', views.ApiRecipePredictionView.as_view(), name='api_recipe_prediction'),
+    path('api/recipe-compare/', views.ApiRecipeCompareView.as_view(), name='api_recipe_compare'),
+    path('api/trial-analysis/<int:pk>/', views.ApiTrialAnalysisView.as_view(), name='api_trial_analysis'),
+    path('api/recipe-suggestions/<int:pk>/', views.ApiRecipeSuggestionsView.as_view(), name='api_recipe_suggestions'),
 ]

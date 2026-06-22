@@ -16,6 +16,9 @@ from .models import (
     MaterialProcessParam, BreakageFlowRecord, StatisticalSnapshot,
     BowType, LifePrediction, MaterialRecommendation,
     BowTypeMatching, BatchRanking,
+    ProcessRecipe, RecipeParam, PerformanceTarget,
+    TrialPlan, TrialResult, RecipePrediction,
+    RecipeComparison, OptimizationSuggestion,
 )
 from .forms import (
     MaterialBatchForm, TensionTestForm, FatigueTestForm,
@@ -26,6 +29,7 @@ from .utils import (
     AnomalyDetector, StatisticsAnalyzer, ReboundRateCalculator,
     BreakFlowManager, SnapshotGenerator,
     LifePredictor, MaterialRecommender, BowTypeMatcher, BatchRanker,
+    RecipePredictor, RecipeComparator, OptimizationGenerator, TrialAnalyzer,
 )
 
 
@@ -1386,4 +1390,638 @@ class ApiPredictionVisualizationView(View):
             'gauge_data': gauge_data,
             'tension_trend': tension_trend,
             'fatigue_sncurve': fatigue_sncurve,
+        }, json_dumps_params={'ensure_ascii': False})
+
+
+class RecipeListView(ListView):
+    model = ProcessRecipe
+    template_name = 'materials/recipe_list.html'
+    context_object_name = 'recipes'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = ProcessRecipe.objects.all().select_related('target_bow_type')
+        q = self.request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                recipe_code__icontains=q
+            ) | queryset.filter(
+                recipe_name__icontains=q
+            ) | queryset.filter(
+                base_material__icontains=q
+            )
+        recipe_type = self.request.GET.get('type')
+        if recipe_type:
+            queryset = queryset.filter(recipe_type=recipe_type)
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['q'] = self.request.GET.get('q', '')
+        context['type_filter'] = self.request.GET.get('type', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['recipe_type_choices'] = ProcessRecipe.RECIPE_TYPE_CHOICES
+        context['status_choices'] = ProcessRecipe.STATUS_CHOICES
+        total = ProcessRecipe.objects.count()
+        context['recipe_summary'] = {
+            'total': total,
+            'draft': ProcessRecipe.objects.filter(status=ProcessRecipe.STATUS_DRAFT).count(),
+            'validated': ProcessRecipe.objects.filter(status=ProcessRecipe.STATUS_VALIDATED).count(),
+            'approved': ProcessRecipe.objects.filter(status=ProcessRecipe.STATUS_APPROVED).count(),
+            'traditional': ProcessRecipe.objects.filter(recipe_type=ProcessRecipe.RECIPE_TYPE_TRADITIONAL).count(),
+            'modern': ProcessRecipe.objects.filter(recipe_type=ProcessRecipe.RECIPE_TYPE_MODERN).count(),
+        }
+        return context
+
+
+class RecipeDetailView(DetailView):
+    model = ProcessRecipe
+    template_name = 'materials/recipe_detail.html'
+    context_object_name = 'recipe'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        recipe = self.object
+        context['params'] = recipe.params.all()
+        context['performance_targets'] = recipe.performance_targets.all()
+        context['predictions'] = recipe.predictions.all()[:10]
+        context['trials'] = recipe.trials.all().select_related('material_batch', 'target_bow_type')[:10]
+        context['suggestions'] = recipe.suggestions.all()[:20]
+        context['derived_recipes'] = recipe.derived_recipes.all()[:5]
+
+        latest_pred = recipe.latest_prediction
+        if latest_pred:
+            radar_data = {
+                'labels': ['耐久性', '稳定性', '回弹表现', '强度'],
+                'values': [
+                    float(latest_pred.predicted_durability),
+                    float(latest_pred.predicted_stability),
+                    float(latest_pred.predicted_rebound),
+                    float(latest_pred.predicted_strength or 0),
+                ],
+            }
+            context['radar_data_json'] = json.dumps(radar_data, ensure_ascii=False)
+
+            history = recipe.predictions.all().order_by('predicted_at')[:20]
+            history_chart = []
+            for p in history:
+                history_chart.append({
+                    'time': p.predicted_at.strftime('%Y-%m-%d %H:%M'),
+                    'overall': float(p.predicted_overall),
+                    'durability': float(p.predicted_durability),
+                    'stability': float(p.predicted_stability),
+                    'rebound': float(p.predicted_rebound),
+                    'risk_score': float(p.predicted_risk_score),
+                })
+            context['history_chart_json'] = json.dumps(history_chart, ensure_ascii=False)
+        return context
+
+
+class RecipeCreateView(CreateView):
+    model = ProcessRecipe
+    fields = [
+        'recipe_code', 'recipe_name', 'recipe_type', 'status',
+        'target_bow_type', 'description', 'base_material',
+        'twist_direction', 'twist_count', 'strand_count',
+        'coating_material', 'curing_method', 'curing_temperature',
+        'curing_duration', 'pretreatment_process', 'weaving_method',
+        'created_by', 'parent_recipe', 'version'
+    ]
+    template_name = 'materials/recipe_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:recipe_detail', kwargs={'pk': self.object.pk})
+
+
+class RecipeUpdateView(UpdateView):
+    model = ProcessRecipe
+    fields = [
+        'recipe_code', 'recipe_name', 'recipe_type', 'status',
+        'target_bow_type', 'description', 'base_material',
+        'twist_direction', 'twist_count', 'strand_count',
+        'coating_material', 'curing_method', 'curing_temperature',
+        'curing_duration', 'pretreatment_process', 'weaving_method',
+        'created_by', 'approved_by', 'parent_recipe', 'version'
+    ]
+    template_name = 'materials/recipe_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:recipe_detail', kwargs={'pk': self.object.pk})
+
+
+class RecipeDeleteView(DeleteView):
+    model = ProcessRecipe
+    template_name = 'materials/recipe_confirm_delete.html'
+
+    def get_success_url(self):
+        return reverse('materials:recipe_list')
+
+
+class RunRecipePredictionView(View):
+    def post(self, request, pk):
+        recipe = get_object_or_404(ProcessRecipe, pk=pk)
+        try:
+            predictor = RecipePredictor(recipe)
+            result = predictor.predict()
+            pred = result['prediction']
+            messages.success(
+                request,
+                f'配方性能预测完成，综合评分{pred.predicted_overall}分，风险等级：{pred.get_predicted_risk_level_display()}'
+            )
+        except Exception as e:
+            messages.error(request, f'预测失败：{str(e)}')
+        return redirect('materials:recipe_detail', pk=pk)
+
+
+class RecipeSuggestionsView(View):
+    def get(self, request, pk):
+        recipe = get_object_or_404(ProcessRecipe, pk=pk)
+        try:
+            generator = OptimizationGenerator(recipe)
+            suggestions = generator.generate_from_prediction()
+            messages.success(request, f'已生成{len(suggestions)}条优化建议')
+        except Exception as e:
+            messages.error(request, f'生成建议失败：{str(e)}')
+        return redirect('materials:recipe_detail', pk=pk)
+
+
+class TrialPlanListView(ListView):
+    model = TrialPlan
+    template_name = 'materials/trial_list.html'
+    context_object_name = 'trials'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = TrialPlan.objects.all().select_related('recipe', 'material_batch', 'target_bow_type')
+        q = self.request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                plan_code__icontains=q
+            ) | queryset.filter(
+                plan_name__icontains=q
+            ) | queryset.filter(
+                recipe__recipe_code__icontains=q
+            )
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+        trial_type = self.request.GET.get('type')
+        if trial_type:
+            queryset = queryset.filter(trial_type=trial_type)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['q'] = self.request.GET.get('q', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['type_filter'] = self.request.GET.get('type', '')
+        context['status_choices'] = TrialPlan.PLAN_STATUS_CHOICES
+        context['trial_type_choices'] = TrialPlan.TRIAL_TYPE_CHOICES
+        total = TrialPlan.objects.count()
+        context['trial_summary'] = {
+            'total': total,
+            'planning': TrialPlan.objects.filter(status=TrialPlan.PLAN_STATUS_PLANNING).count(),
+            'in_progress': TrialPlan.objects.filter(status=TrialPlan.PLAN_STATUS_IN_PROGRESS).count(),
+            'completed': TrialPlan.objects.filter(status=TrialPlan.PLAN_STATUS_COMPLETED).count(),
+            'failed': TrialPlan.objects.filter(status=TrialPlan.PLAN_STATUS_FAILED).count(),
+        }
+        return context
+
+
+class TrialPlanDetailView(DetailView):
+    model = TrialPlan
+    template_name = 'materials/trial_detail.html'
+    context_object_name = 'trial'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        trial = self.object
+        context['recipe'] = trial.recipe
+        context['results'] = trial.results.all()
+
+        perf_chart = []
+        for r in trial.results.all():
+            perf_chart.append({
+                'sample': r.sample_id,
+                'durability': float(r.durability_score or 0),
+                'stability': float(r.stability_score or 0),
+                'rebound': float(r.rebound_performance or 0),
+                'strength': float(r.strength_score or 0),
+                'overall': float(r.overall_score or 0),
+                'risk': float(r.risk_score or 0),
+            })
+        context['perf_chart_json'] = json.dumps(perf_chart, ensure_ascii=False)
+
+        result_dist = {}
+        for val, label in TrialResult.RESULT_CHOICES:
+            result_dist[val] = {
+                'label': label,
+                'count': trial.results.filter(result_status=val).count()
+            }
+        context['result_dist_json'] = json.dumps(result_dist, ensure_ascii=False)
+        return context
+
+
+class TrialPlanCreateView(CreateView):
+    model = TrialPlan
+    fields = [
+        'plan_code', 'plan_name', 'recipe', 'material_batch',
+        'trial_type', 'status', 'target_bow_type', 'sample_count',
+        'planned_start_date', 'planned_end_date', 'tester',
+        'test_environment', 'preparation_notes', 'test_procedure',
+        'expected_outcomes', 'created_by'
+    ]
+    template_name = 'materials/trial_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:trial_detail', kwargs={'pk': self.object.pk})
+
+
+class TrialPlanUpdateView(UpdateView):
+    model = TrialPlan
+    fields = [
+        'plan_code', 'plan_name', 'recipe', 'material_batch',
+        'trial_type', 'status', 'target_bow_type', 'sample_count',
+        'planned_start_date', 'planned_end_date', 'actual_start_date',
+        'actual_end_date', 'tester', 'test_environment',
+        'preparation_notes', 'test_procedure', 'expected_outcomes'
+    ]
+    template_name = 'materials/trial_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:trial_detail', kwargs={'pk': self.object.pk})
+
+
+class TrialPlanStartView(View):
+    def post(self, request, pk):
+        trial = get_object_or_404(TrialPlan, pk=pk)
+        try:
+            trial.start()
+            messages.success(request, f'试制方案"{trial.plan_name}"已启动')
+        except Exception as e:
+            messages.error(request, f'启动失败：{str(e)}')
+        return redirect('materials:trial_detail', pk=pk)
+
+
+class TrialPlanCompleteView(View):
+    def post(self, request, pk):
+        trial = get_object_or_404(TrialPlan, pk=pk)
+        try:
+            trial.complete()
+            analyzer = TrialAnalyzer(trial)
+            analysis = analyzer.analyze_results()
+            for r in trial.results.all():
+                if r.trial_plan.recipe_id:
+                    generator = OptimizationGenerator(r.trial_plan.recipe, r)
+                    generator.generate_from_trial_result()
+            messages.success(request, f'试制方案"{trial.plan_name}"已完成，已生成分析结果和优化建议')
+        except Exception as e:
+            messages.error(request, f'完成失败：{str(e)}')
+        return redirect('materials:trial_detail', pk=pk)
+
+
+class TrialResultCreateView(CreateView):
+    model = TrialResult
+    fields = [
+        'sample_id', 'test_date', 'test_operator',
+        'durability_score', 'stability_score', 'rebound_performance',
+        'strength_score', 'risk_level', 'measured_force',
+        'measured_elongation', 'measured_rebound_rate', 'fatigue_cycles',
+        'measured_diameter', 'weight_per_meter', 'lifespan_estimate_hours',
+        'estimated_shots', 'is_broken', 'break_location', 'break_mode',
+        'break_reason', 'observations', 'issues_found', 'recommendations',
+        'raw_data_reference', 'notes'
+    ]
+    template_name = 'materials/trial_result_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.trial_plan = get_object_or_404(TrialPlan, pk=kwargs.get('pk'))
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        form.instance.trial_plan = self.trial_plan
+        result = super().form_valid(form)
+        self.object.evaluate_targets()
+        self.object.save()
+        return result
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['trial_plan'] = self.trial_plan
+        context['recipe'] = self.trial_plan.recipe
+        return context
+
+    def get_success_url(self):
+        return reverse('materials:trial_detail', kwargs={'pk': self.trial_plan.pk})
+
+
+class TrialResultUpdateView(UpdateView):
+    model = TrialResult
+    fields = [
+        'sample_id', 'test_date', 'test_operator',
+        'durability_score', 'stability_score', 'rebound_performance',
+        'strength_score', 'risk_level', 'measured_force',
+        'measured_elongation', 'measured_rebound_rate', 'fatigue_cycles',
+        'measured_diameter', 'weight_per_meter', 'lifespan_estimate_hours',
+        'estimated_shots', 'is_broken', 'break_location', 'break_mode',
+        'break_reason', 'observations', 'issues_found', 'recommendations',
+        'raw_data_reference', 'notes'
+    ]
+    template_name = 'materials/trial_result_form.html'
+
+    def form_valid(self, form):
+        result = super().form_valid(form)
+        self.object.evaluate_targets()
+        self.object.save()
+        return result
+
+    def get_success_url(self):
+        return reverse('materials:trial_detail', kwargs={'pk': self.object.trial_plan_id})
+
+
+class EvaluateTrialResultView(View):
+    def post(self, request, pk):
+        result = get_object_or_404(TrialResult, pk=pk)
+        try:
+            met, missed = result.evaluate_targets()
+            result.save()
+            messages.success(request, f'目标评估完成：达成{len(met)}项，未达成{len(missed)}项')
+        except Exception as e:
+            messages.error(request, f'评估失败：{str(e)}')
+        return redirect('materials:trial_detail', pk=result.trial_plan_id)
+
+
+class TrialAnalysisView(View):
+    def get(self, request, pk):
+        trial = get_object_or_404(TrialPlan, pk=pk)
+        try:
+            analyzer = TrialAnalyzer(trial)
+            analysis = analyzer.analyze_results()
+            context = {
+                'trial': trial,
+                'analysis': analysis,
+                'analysis_json': json.dumps(analysis, ensure_ascii=False),
+            }
+            return render(request, 'materials/trial_analysis.html', context)
+        except Exception as e:
+            messages.error(request, f'分析失败：{str(e)}')
+            return redirect('materials:trial_detail', pk=pk)
+
+
+class RecipeCompareView(View):
+    def get(self, request):
+        recipe_ids = request.GET.getlist('ids')
+        comparison_data = None
+        recipes = ProcessRecipe.objects.all()[:20]
+        selected_recipes = []
+
+        if recipe_ids:
+            selected_recipes = ProcessRecipe.objects.filter(pk__in=recipe_ids)
+            if selected_recipes.count() >= 2:
+                comparator = RecipeComparator(selected_recipes)
+                comparison_data = comparator.full_comparison()
+
+        context = {
+            'recipes': recipes,
+            'selected_recipes': selected_recipes,
+            'selected_ids': recipe_ids,
+            'comparison': comparison_data,
+            'comparison_json': json.dumps(comparison_data, ensure_ascii=False) if comparison_data else None,
+        }
+        return render(request, 'materials/recipe_compare.html', context)
+
+
+class ApiRecipePredictionView(View):
+    def post(self, request, pk):
+        recipe = get_object_or_404(ProcessRecipe, pk=pk)
+        try:
+            predictor = RecipePredictor(recipe)
+            result = predictor.predict()
+            pred = result['prediction']
+            return JsonResponse({
+                'success': True,
+                'data': {
+                    'id': pred.pk,
+                    'durability': pred.predicted_durability,
+                    'stability': pred.predicted_stability,
+                    'rebound': pred.predicted_rebound,
+                    'strength': pred.predicted_strength,
+                    'overall': pred.predicted_overall,
+                    'risk_level': pred.predicted_risk_level,
+                    'risk_level_display': pred.get_predicted_risk_level_display(),
+                    'risk_score': pred.predicted_risk_score,
+                    'lifespan_hours': pred.predicted_lifespan_hours,
+                    'confidence': pred.confidence_level,
+                    'key_factors': pred.key_factors,
+                    'strengths': pred.strength_analysis,
+                    'weaknesses': pred.weakness_analysis,
+                    'optimization_suggestions': pred.optimization_suggestions,
+                },
+                'component_scores': result.get('component_scores', {}),
+                'reference_data': result.get('reference_data'),
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiRecipeCompareView(View):
+    def get(self, request):
+        try:
+            ids_str = request.GET.get('ids', '')
+            ids = [int(x) for x in ids_str.split(',') if x.strip()]
+            compare_type = request.GET.get('type', 'full')
+
+            if len(ids) < 2:
+                return JsonResponse({
+                    'success': False,
+                    'error': '至少需要选择2个配方进行对比'
+                }, status=400)
+
+            recipes = ProcessRecipe.objects.filter(pk__in=ids)
+            if recipes.count() < 2:
+                return JsonResponse({
+                    'success': False,
+                    'error': '找到的配方数量不足'
+                }, status=404)
+
+            comparator = RecipeComparator(recipes)
+            if compare_type == 'performance':
+                data = comparator.compare_performance()
+            elif compare_type == 'params':
+                data = comparator.compare_parameters()
+            else:
+                data = comparator.full_comparison()
+
+            return JsonResponse({
+                'success': True,
+                'compare_type': compare_type,
+                'data': data,
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiTrialAnalysisView(View):
+    def get(self, request, pk):
+        trial = get_object_or_404(TrialPlan, pk=pk)
+        try:
+            analyzer = TrialAnalyzer(trial)
+            analysis = analyzer.analyze_results()
+            return JsonResponse({
+                'success': True,
+                'trial': {
+                    'id': trial.pk,
+                    'code': trial.plan_code,
+                    'name': trial.plan_name,
+                },
+                'analysis': analysis,
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiRecipeSuggestionsView(View):
+    def get(self, request, pk):
+        recipe = get_object_or_404(ProcessRecipe, pk=pk)
+        try:
+            status_filter = request.GET.get('status', '')
+            severity_filter = request.GET.get('severity', '')
+
+            qs = recipe.suggestions.all()
+            if status_filter:
+                qs = qs.filter(status=status_filter)
+            if severity_filter:
+                qs = qs.filter(severity=severity_filter)
+
+            data = []
+            for s in qs:
+                data.append({
+                    'id': s.pk,
+                    'title': s.title,
+                    'category': s.category,
+                    'category_display': s.get_category_display(),
+                    'severity': s.severity,
+                    'severity_display': s.get_severity_display(),
+                    'status': s.status,
+                    'status_display': s.get_status_display(),
+                    'description': s.description,
+                    'current_state': s.current_state,
+                    'suggested_action': s.suggested_action,
+                    'expected_improvement': s.expected_improvement,
+                    'affected_params': s.affected_params,
+                    'generated_by': s.generated_by,
+                    'created_at': s.created_at.strftime('%Y-%m-%d %H:%M'),
+                })
+            return JsonResponse({
+                'success': True,
+                'recipe': {
+                    'id': recipe.pk,
+                    'code': recipe.recipe_code,
+                    'name': recipe.recipe_name,
+                },
+                'total': qs.count(),
+                'suggestions': data,
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+    def post(self, request, pk):
+        recipe = get_object_or_404(ProcessRecipe, pk=pk)
+        try:
+            trial_result_id = request.POST.get('trial_result_id')
+            trial_result = None
+            if trial_result_id:
+                trial_result = TrialResult.objects.filter(pk=trial_result_id, trial_plan__recipe=recipe).first()
+
+            generator = OptimizationGenerator(recipe, trial_result)
+            if trial_result:
+                suggestions = generator.generate_all()
+            else:
+                suggestions = generator.generate_from_prediction()
+
+            data = [{'id': s.pk, 'title': s.title, 'severity': s.get_severity_display()} for s in suggestions]
+            return JsonResponse({
+                'success': True,
+                'generated_count': len(suggestions),
+                'suggestions': data,
+            }, json_dumps_params={'ensure_ascii': False})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+class ApiRecipeVisualizationView(View):
+    def get(self, request, pk):
+        recipe = get_object_or_404(ProcessRecipe, pk=pk)
+
+        latest_pred = recipe.latest_prediction
+        radar_data = None
+        gauge_data = None
+        history_data = []
+        trial_performance = []
+
+        if latest_pred:
+            radar_data = {
+                'labels': ['耐久性', '稳定性', '回弹表现', '强度'],
+                'values': [
+                    float(latest_pred.predicted_durability),
+                    float(latest_pred.predicted_stability),
+                    float(latest_pred.predicted_rebound),
+                    float(latest_pred.predicted_strength or 0),
+                ],
+            }
+            gauge_data = {
+                'overall': {
+                    'value': float(latest_pred.predicted_overall),
+                    'label': '综合评分',
+                    'thresholds': [30, 50, 70, 100],
+                },
+                'risk': {
+                    'value': float(latest_pred.predicted_risk_score),
+                    'label': '风险指数',
+                    'thresholds': [25, 50, 75, 100],
+                },
+            }
+
+        history = recipe.predictions.all().order_by('predicted_at')[:30]
+        for p in history:
+            history_data.append({
+                'time': p.predicted_at.strftime('%Y-%m-%d %H:%M'),
+                'overall': float(p.predicted_overall),
+                'durability': float(p.predicted_durability),
+                'stability': float(p.predicted_stability),
+                'rebound': float(p.predicted_rebound),
+                'risk_score': float(p.predicted_risk_score),
+            })
+
+        for trial in recipe.trials.all().prefetch_related('results'):
+            for r in trial.results.all():
+                trial_performance.append({
+                    'trial_code': trial.plan_code,
+                    'sample': r.sample_id,
+                    'date': r.test_date.isoformat(),
+                    'durability': float(r.durability_score or 0),
+                    'stability': float(r.stability_score or 0),
+                    'rebound': float(r.rebound_performance or 0),
+                    'strength': float(r.strength_score or 0),
+                    'overall': float(r.overall_score or 0),
+                    'risk_level': r.risk_level,
+                    'result_status': r.result_status,
+                })
+
+        return JsonResponse({
+            'success': True,
+            'recipe': {
+                'id': recipe.pk,
+                'code': recipe.recipe_code,
+                'name': recipe.recipe_name,
+                'type': recipe.get_recipe_type_display(),
+                'status': recipe.get_status_display(),
+            },
+            'radar_data': radar_data,
+            'gauge_data': gauge_data,
+            'prediction_history': history_data,
+            'trial_performance': trial_performance,
         }, json_dumps_params={'ensure_ascii': False})
