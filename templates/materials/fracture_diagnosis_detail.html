@@ -1,0 +1,204 @@
+{% extends 'base.html' %}
+
+{% block title %}断裂诊断详情 - {{ diagnosis.diagnosis_code }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔬 断裂诊断详情 - {{ diagnosis.diagnosis_code }}</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:fracture_diagnosis_list' %}" class="btn btn-secondary">返回列表</a>
+        {% if diagnosis.diagnosis_status != 'completed' %}
+        <a href="{% url 'materials:fracture_diagnosis_edit' diagnosis.pk %}" class="btn btn-primary">编辑</a>
+        {% endif %}
+        {% if diagnosis.diagnosis_status == 'in_progress' %}
+        <a href="{% url 'materials:fracture_diagnosis_complete' diagnosis.pk %}" class="btn btn-success">完成诊断</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">基本信息</div>
+        <div class="detail-grid">
+            <div class="detail-item">
+                <div class="label">诊断编号</div>
+                <div class="value"><strong>{{ diagnosis.diagnosis_code }}</strong></div>
+            </div>
+            <div class="detail-item">
+                <div class="label">诊断状态</div>
+                <div class="value"><span class="badge {{ diagnosis.status_color_class }}">{{ diagnosis.get_diagnosis_status_display }}</span></div>
+            </div>
+            <div class="detail-item">
+                <div class="label">关联批次</div>
+                <div class="value"><a href="{% url 'materials:batch_detail' diagnosis.batch.pk %}">{{ diagnosis.batch.batch_number }}</a></div>
+            </div>
+            <div class="detail-item">
+                <div class="label">断裂模式</div>
+                <div class="value">{{ diagnosis.get_fracture_mode_display }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">测试类型</div>
+                <div class="value">{{ diagnosis.get_source_test_type_display }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">断裂位置</div>
+                <div class="value">{{ diagnosis.fracture_location|default:"-" }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">创建时间</div>
+                <div class="value">{{ diagnosis.created_at|date:"Y-m-d H:i" }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">诊断人</div>
+                <div class="value">{{ diagnosis.diagnosed_by|default:"-" }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">断口形貌与特征</div>
+        <div class="detail-grid">
+            <div class="detail-item">
+                <div class="label">断裂能</div>
+                <div class="value">{{ diagnosis.fracture_energy|default:"-" }} J</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">裂纹扩展速率</div>
+                <div class="value">{{ diagnosis.crack_propagation_rate|default:"-" }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">疲劳裂纹萌生循环数</div>
+                <div class="value">{{ diagnosis.fatigue_crack_initiation_cycles|default:"-" }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">是否验证</div>
+                <div class="value">{% if diagnosis.is_verified %}是{% else %}否{% endif %}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">断口形貌描述</div>
+    <p>{{ diagnosis.fracture_surface|default:"暂无描述"|linebreaks }}</p>
+</div>
+
+<div class="card">
+    <div class="card-title">断裂原因分析</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <div class="label">主因分类</div>
+            <div class="value">{{ diagnosis.root_cause_category|default:"-" }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">主要原因</div>
+            <div class="value">{{ diagnosis.primary_cause|default:"-" }}</div>
+        </div>
+    </div>
+    
+    <div class="two-col" style="margin-top: 1rem;">
+        <div>
+            <h4 style="margin-bottom: 0.5rem; color: #374151; font-size: 0.95rem;">材料因素</h4>
+            {% if diagnosis.material_factors %}
+            <ul style="list-style: disc; padding-left: 1.25rem; color: #4b5563; font-size: 0.9rem;">
+                {% for factor in diagnosis.material_factors %}
+                <li>{{ factor }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color: #9ca3af; font-size: 0.9rem;">暂无</p>
+            {% endif %}
+        </div>
+        <div>
+            <h4 style="margin-bottom: 0.5rem; color: #374151; font-size: 0.95rem;">工艺因素</h4>
+            {% if diagnosis.process_factors %}
+            <ul style="list-style: disc; padding-left: 1.25rem; color: #4b5563; font-size: 0.9rem;">
+                {% for factor in diagnosis.process_factors %}
+                <li>{{ factor }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color: #9ca3af; font-size: 0.9rem;">暂无</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="two-col" style="margin-top: 1rem;">
+        <div>
+            <h4 style="margin-bottom: 0.5rem; color: #374151; font-size: 0.95rem;">环境因素</h4>
+            {% if diagnosis.environmental_factors %}
+            <ul style="list-style: disc; padding-left: 1.25rem; color: #4b5563; font-size: 0.9rem;">
+                {% for factor in diagnosis.environmental_factors %}
+                <li>{{ factor }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color: #9ca3af; font-size: 0.9rem;">暂无</p>
+            {% endif %}
+        </div>
+        <div>
+            <h4 style="margin-bottom: 0.5rem; color: #374151; font-size: 0.95rem;">测试因素</h4>
+            {% if diagnosis.test_factors %}
+            <ul style="list-style: disc; padding-left: 1.25rem; color: #4b5563; font-size: 0.9rem;">
+                {% for factor in diagnosis.test_factors %}
+                <li>{{ factor }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color: #9ca3af; font-size: 0.9rem;">暂无</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% if diagnosis.secondary_causes %}
+    <div style="margin-top: 1rem;">
+        <h4 style="margin-bottom: 0.5rem; color: #374151; font-size: 0.95rem;">次要原因</h4>
+        <ul style="list-style: disc; padding-left: 1.25rem; color: #4b5563; font-size: 0.9rem;">
+            {% for cause in diagnosis.secondary_causes %}
+            <li>{{ cause }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">诊断结论</div>
+        <p>{{ diagnosis.diagnosis_conclusion|default:"暂无结论"|linebreaks }}</p>
+    </div>
+    <div class="card">
+        <div class="card-title">改进建议</div>
+        <p>{{ diagnosis.improvement_suggestions|default:"暂无建议"|linebreaks }}</p>
+    </div>
+</div>
+
+{% if diagnosis.diagnosed_at %}
+<div class="card green">
+    <div class="card-title">诊断完成信息</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <div class="label">完成时间</div>
+            <div class="value">{{ diagnosis.diagnosed_at|date:"Y-m-d H:i" }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">完成人</div>
+            <div class="value">{{ diagnosis.diagnosed_by|default:"-" }}</div>
+        </div>
+        {% if diagnosis.reviewed_by %}
+        <div class="detail-item">
+            <div class="label">审核人</div>
+            <div class="value">{{ diagnosis.reviewed_by }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if diagnosis.notes %}
+<div class="card">
+    <div class="card-title">备注</div>
+    <p>{{ diagnosis.notes|linebreaks }}</p>
+</div>
+{% endif %}
+{% endblock %}

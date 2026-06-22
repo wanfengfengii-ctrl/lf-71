@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+
+{% block title %}缺陷类型管理 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📋 缺陷类型管理</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:quality_traceability_dashboard' %}" class="btn btn-secondary">返回仪表盘</a>
+        <a href="{% url 'materials:defect_type_create' %}" class="btn btn-primary">新增缺陷类型</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">缺陷类型列表</div>
+    <div class="filter-bar">
+        <form method="get" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <div>
+                <label>类别：</label>
+                <select name="category" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for cat_val, cat_label in category_choices %}
+                    <option value="{{ cat_val }}" {% if request.GET.category == cat_val|stringformat:"s" %}selected{% endif %}>{{ cat_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>严重程度：</label>
+                <select name="severity" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for sev_val, sev_label in severity_choices %}
+                    <option value="{{ sev_val }}" {% if request.GET.severity == sev_val|stringformat:"s" %}selected{% endif %}>{{ sev_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <a href="{% url 'materials:defect_type_list' %}" class="btn btn-sm btn-secondary">重置</a>
+        </form>
+    </div>
+
+    {% if object_list %}
+    <table>
+        <thead>
+            <tr>
+                <th>编码</th>
+                <th>名称</th>
+                <th>类别</th>
+                <th>严重程度</th>
+                <th>描述</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for defect_type in object_list %}
+            <tr>
+                <td><strong>{{ defect_type.defect_code }}</strong></td>
+                <td>{{ defect_type.defect_name }}</td>
+                <td>{{ defect_type.get_category_display }}</td>
+                <td><span class="badge {{ defect_type.severity_color_class }}">{{ defect_type.get_severity_level_display }}</span></td>
+                <td style="max-width: 300px;">{{ defect_type.description|truncatechars:50|default:"-" }}</td>
+                <td>
+                    <a href="{% url 'materials:defect_type_edit' defect_type.pk %}" class="btn btn-sm btn-primary">编辑</a>
+                    <a href="{% url 'materials:defect_type_delete' defect_type.pk %}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除该缺陷类型？')">删除</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if is_paginated %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?page=1{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.severity %}&severity={{ request.GET.severity }}{% endif %}">首页</a>
+        <a href="?page={{ page_obj.previous_page_number }}{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.severity %}&severity={{ request.GET.severity }}{% endif %}">上一页</a>
+        {% endif %}
+        <span>第 {{ page_obj.number }} / {{ paginator.num_pages }} 页</span>
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.severity %}&severity={{ request.GET.severity }}{% endif %}">下一页</a>
+        <a href="?page={{ paginator.num_pages }}{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.severity %}&severity={{ request.GET.severity }}{% endif %}">末页</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>暂无缺陷类型记录</p>
+        <a href="{% url 'materials:defect_type_create' %}" class="btn btn-primary">新增缺陷类型</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

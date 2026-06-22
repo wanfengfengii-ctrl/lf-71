@@ -1,0 +1,331 @@
+{% extends 'base.html' %}
+
+{% block title %}质量追溯与缺陷诊断 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔍 质量追溯与缺陷诊断</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:defect_record_list' %}" class="btn btn-primary">缺陷记录</a>
+        <a href="{% url 'materials:quality_issue_list' %}" class="btn btn-primary">质量问题</a>
+        <a href="{% url 'materials:fracture_diagnosis_list' %}" class="btn btn-primary">断裂诊断</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">总批次</div>
+        <div class="stat-value">{{ total_batches }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">缺陷总数</div>
+        <div class="stat-value">{{ total_defects }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">未解决缺陷</div>
+        <div class="stat-value">{{ unresolved_defects }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">断裂诊断</div>
+        <div class="stat-value">{{ total_fracture_diagnoses }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">待处理质量问题</div>
+        <div class="stat-value">{{ open_quality_issues }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">高风险工艺点</div>
+        <div class="stat-value">{{ high_risk_points }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">质量问题总数</div>
+        <div class="stat-value">{{ total_quality_issues }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">风险点总数</div>
+        <div class="stat-value">{{ total_risk_points }}</div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">缺陷类别分布</div>
+        <div class="chart-container" id="defectCategoryChart"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">质量趋势（近30天）</div>
+        <div class="chart-container" id="qualityTrendChart"></div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">
+            最近缺陷记录
+            <a href="{% url 'materials:defect_record_list' %}" class="btn btn-sm btn-secondary" style="float: right;">查看全部</a>
+        </div>
+        {% if recent_defects %}
+        <table>
+            <thead>
+                <tr>
+                    <th>缺陷编号</th>
+                    <th>批次</th>
+                    <th>类型</th>
+                    <th>状态</th>
+                    <th>严重程度</th>
+                    <th>发现时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for defect in recent_defects %}
+                <tr>
+                    <td><a href="{% url 'materials:defect_record_detail' defect.pk %}">{{ defect.defect_code }}</a></td>
+                    <td>{{ defect.batch.batch_number }}</td>
+                    <td>{{ defect.defect_type.defect_name|default:"未分类" }}</td>
+                    <td><span class="badge {{ defect.status_color_class }}">{{ defect.get_status_display }}</span></td>
+                    <td><span class="badge {{ defect.severity_color_class }}">{{ defect.get_severity_assessment_display }}</span></td>
+                    <td>{{ defect.detected_at|date:"Y-m-d" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无缺陷记录</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-title">
+            最近质量问题
+            <a href="{% url 'materials:quality_issue_list' %}" class="btn btn-sm btn-secondary" style="float: right;">查看全部</a>
+        </div>
+        {% if recent_quality_issues %}
+        <table>
+            <thead>
+                <tr>
+                    <th>问题编号</th>
+                    <th>标题</th>
+                    <th>类型</th>
+                    <th>优先级</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for issue in recent_quality_issues %}
+                <tr>
+                    <td><a href="{% url 'materials:quality_issue_detail' issue.pk %}">{{ issue.issue_code }}</a></td>
+                    <td>{{ issue.issue_title }}</td>
+                    <td>{{ issue.get_issue_type_display }}</td>
+                    <td><span class="badge {{ issue.priority_color_class }}">{{ issue.get_priority_display }}</span></td>
+                    <td><span class="badge {{ issue.status_color_class }}">{{ issue.get_status_display }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无质量问题</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">
+        最近断裂诊断
+        <a href="{% url 'materials:fracture_diagnosis_list' %}" class="btn btn-sm btn-secondary" style="float: right;">查看全部</a>
+    </div>
+    {% if recent_diagnoses %}
+    <table>
+        <thead>
+            <tr>
+                <th>诊断编号</th>
+                <th>批次</th>
+                <th>断裂模式</th>
+                <th>状态</th>
+                <th>创建时间</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for diagnosis in recent_diagnoses %}
+            <tr>
+                <td><a href="{% url 'materials:fracture_diagnosis_detail' diagnosis.pk %}">{{ diagnosis.diagnosis_code }}</a></td>
+                <td>{{ diagnosis.batch.batch_number }}</td>
+                <td>{{ diagnosis.get_fracture_mode_display }}</td>
+                <td><span class="badge {{ diagnosis.status_color_class }}">{{ diagnosis.get_diagnosis_status_display }}</span></td>
+                <td>{{ diagnosis.created_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无断裂诊断记录</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-title">快速入口</div>
+    <div class="stats-grid">
+        <a href="{% url 'materials:defect_type_list' %}" class="stat-card" style="text-decoration: none; color: inherit;">
+            <div class="stat-label">缺陷类型管理</div>
+            <div class="stat-value" style="font-size: 1.2rem;">📋 缺陷类型库</div>
+        </a>
+        <a href="{% url 'materials:process_risk_point_list' %}" class="stat-card orange" style="text-decoration: none; color: inherit;">
+            <div class="stat-label">工艺风险识别</div>
+            <div class="stat-value" style="font-size: 1.2rem;">⚠️ 风险点分析</div>
+        </a>
+        <a href="{% url 'materials:quality_trend' %}" class="stat-card green" style="text-decoration: none; color: inherit;">
+            <div class="stat-label">质量趋势分析</div>
+            <div class="stat-value" style="font-size: 1.2rem;">📈 趋势图表</div>
+        </a>
+        <a href="{% url 'materials:batch_list' %}" class="stat-card" style="text-decoration: none; color: inherit;">
+            <div class="stat-label">批次追溯</div>
+            <div class="stat-value" style="font-size: 1.2rem;">🔗 全链路追溯</div>
+        </a>
+    </div>
+</div>
+
+<script>
+    const defectByCategory = {{ defect_by_category_json|safe }};
+    const defectTrend = {{ defect_trend_json|safe }};
+    const topDefectTypes = {{ top_defect_types_json|safe }};
+
+    function renderDefectCategoryChart() {
+        const container = document.getElementById('defectCategoryChart');
+        if (!container || Object.keys(defectByCategory).length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>暂无数据</p></div>';
+            return;
+        }
+
+        const categories = Object.values(defectByCategory).map(d => d.label);
+        const counts = Object.values(defectByCategory).map(d => d.count);
+        const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'];
+
+        let html = '<div style="display: flex; align-items: center; justify-content: space-around; height: 100%;">';
+        html += '<div style="flex: 1;">';
+        
+        const total = counts.reduce((a, b) => a + b, 0);
+        let cumulativePercent = 0;
+        const radius = 60;
+        const circumference = 2 * Math.PI * radius;
+        
+        html += `<svg width="160" height="160" viewBox="0 0 160 160">`;
+        html += `<circle cx="80" cy="80" r="${radius}" fill="none" stroke="#e5e7eb" stroke-width="20"/>`;
+        
+        let offset = 0;
+        counts.forEach((count, i) => {
+            const percent = total > 0 ? count / total : 0;
+            const dashArray = circumference * percent;
+            html += `<circle cx="80" cy="80" r="${radius}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="20"
+                stroke-dasharray="${dashArray} ${circumference - dashArray}"
+                stroke-dashoffset="${-offset}"
+                transform="rotate(-90 80 80)"/>`;
+            offset += dashArray;
+        });
+        html += `<text x="80" y="75" text-anchor="middle" font-size="14" font-weight="bold" fill="#1f2937">${total}</text>`;
+        html += `<text x="80" y="95" text-anchor="middle" font-size="10" fill="#6b7280">总缺陷</text>`;
+        html += '</svg></div>';
+
+        html += '<div style="flex: 1;">';
+        categories.forEach((cat, i) => {
+            const percent = total > 0 ? ((counts[i] / total) * 100).toFixed(1) : 0;
+            html += `<div style="display: flex; align-items: center; margin-bottom: 8px;">
+                <div style="width: 12px; height: 12px; background: ${colors[i % colors.length]}; border-radius: 2px; margin-right: 8px;"></div>
+                <span style="flex: 1; font-size: 12px; color: #4b5563;">${cat}</span>
+                <span style="font-size: 12px; font-weight: 600; color: #1f2937;">${counts[i]} (${percent}%)</span>
+            </div>`;
+        });
+        html += '</div></div>';
+        
+        container.innerHTML = html;
+    }
+
+    function renderQualityTrendChart() {
+        const container = document.getElementById('qualityTrendChart');
+        if (!container || defectTrend.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>暂无数据</p></div>';
+            return;
+        }
+
+        const width = container.clientWidth - 20;
+        const height = 340;
+        const padding = { top: 20, right: 20, bottom: 40, left: 50 };
+        const chartWidth = width - padding.left - padding.right;
+        const chartHeight = height - padding.top - padding.bottom;
+
+        const dates = defectTrend.map(d => d.date);
+        const defectCounts = defectTrend.map(d => d.defect_count);
+        const qualityScores = defectTrend.map(d => d.quality_score);
+
+        const maxDefect = Math.max(...defectCounts, 1);
+        const minScore = Math.min(...qualityScores, 100);
+        const maxScore = Math.max(...qualityScores, 0);
+
+        const xStep = dates.length > 1 ? chartWidth / (dates.length - 1) : chartWidth;
+        
+        let svg = `<svg width="100%" height="${height}" viewBox="0 0 ${width} ${height}">`;
+        
+        for (let i = 0; i <= 5; i++) {
+            const y = padding.top + (chartHeight / 5) * i;
+            svg += `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="#e5e7eb" stroke-width="1"/>`;
+        }
+
+        let qualityPath = '';
+        qualityScores.forEach((score, i) => {
+            const x = padding.left + xStep * i;
+            const y = padding.top + chartHeight - ((score - 0) / (100 - 0)) * chartHeight;
+            if (i === 0) qualityPath += `M ${x} ${y}`;
+            else qualityPath += ` L ${x} ${y}`;
+        });
+        svg += `<path d="${qualityPath}" fill="none" stroke="#10b981" stroke-width="2"/>`;
+
+        let defectPath = '';
+        defectCounts.forEach((count, i) => {
+            const x = padding.left + xStep * i;
+            const y = padding.top + chartHeight - (count / maxDefect) * chartHeight;
+            if (i === 0) defectPath += `M ${x} ${y}`;
+            else defectPath += ` L ${x} ${y}`;
+        });
+        svg += `<path d="${defectPath}" fill="none" stroke="#ef4444" stroke-width="2"/>`;
+
+        qualityScores.forEach((score, i) => {
+            const x = padding.left + xStep * i;
+            const y = padding.top + chartHeight - ((score - 0) / (100 - 0)) * chartHeight;
+            svg += `<circle cx="${x}" cy="${y}" r="3" fill="#10b981"/>`;
+        });
+
+        defectCounts.forEach((count, i) => {
+            const x = padding.left + xStep * i;
+            const y = padding.top + chartHeight - (count / maxDefect) * chartHeight;
+            svg += `<circle cx="${x}" cy="${y}" r="3" fill="#ef4444"/>`;
+        });
+
+        const labelStep = Math.ceil(dates.length / 6);
+        dates.forEach((date, i) => {
+            if (i % labelStep === 0 || i === dates.length - 1) {
+                const x = padding.left + xStep * i;
+                svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle" font-size="10" fill="#6b7280">${date.slice(5)}</text>`;
+            }
+        });
+
+        svg += `<text x="${padding.left - 40}" y="${padding.top + chartHeight / 2}" text-anchor="middle" font-size="10" fill="#6b7280" transform="rotate(-90 ${padding.left - 40} ${padding.top + chartHeight / 2})">质量评分/缺陷数</text>`;
+
+        svg += `<rect x="${width - padding.right - 120}" y="${padding.top}" width="10" height="10" fill="#10b981"/>`;
+        svg += `<text x="${width - padding.right - 105}" y="${padding.top + 9}" font-size="10" fill="#4b5563">质量评分</text>`;
+        svg += `<rect x="${width - padding.right - 120}" y="${padding.top + 15}" width="10" height="10" fill="#ef4444"/>`;
+        svg += `<text x="${width - padding.right - 105}" y="${padding.top + 24}" font-size="10" fill="#4b5563">缺陷数量</text>`;
+
+        svg += '</svg>';
+        container.innerHTML = svg;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        renderDefectCategoryChart();
+        renderQualityTrendChart();
+    });
+</script>
+{% endblock %}

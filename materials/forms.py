@@ -3,6 +3,8 @@ from django.core.exceptions import ValidationError
 from .models import (
     MaterialBatch, TensionTest, FatigueTest, DataAnomalyLog,
     MaterialProcessParam, BreakageFlowRecord,
+    DefectType, DefectRecord, FractureDiagnosis,
+    QualityIssue, ProcessRiskPoint,
 )
 from .utils import AnomalyDetector, ReboundRateCalculator
 
@@ -347,4 +349,216 @@ class ProcessNoteForm(forms.Form):
         max_length=100,
         required=False,
         label='操作人'
+    )
+
+
+class DefectTypeForm(forms.ModelForm):
+    class Meta:
+        model = DefectType
+        fields = [
+            'defect_code', 'defect_name', 'category', 'severity',
+            'description', 'typical_causes', 'detection_method',
+            'prevention_measures', 'is_active'
+        ]
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 2}),
+            'typical_causes': forms.Textarea(attrs={'rows': 2}),
+            'detection_method': forms.Textarea(attrs={'rows': 2}),
+            'prevention_measures': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def clean_defect_code(self):
+        defect_code = self.cleaned_data.get('defect_code')
+        if DefectType.objects.filter(
+                defect_code=defect_code
+        ).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError('该缺陷编码已存在')
+        return defect_code
+
+
+class DefectRecordForm(forms.ModelForm):
+    class Meta:
+        model = DefectRecord
+        fields = [
+            'defect_type', 'defect_code', 'source_type', 'source_id',
+            'defect_location', 'defect_size', 'description',
+            'severity_assessment', 'root_cause', 'corrective_action',
+            'preventive_action', 'detected_by', 'detected_at', 'notes'
+        ]
+        widgets = {
+            'detected_at': forms.DateTimeInput(
+                attrs={'type': 'datetime-local'},
+                format='%Y-%m-%dT%H:%M'
+            ),
+            'description': forms.Textarea(attrs={'rows': 3}),
+            'root_cause': forms.Textarea(attrs={'rows': 2}),
+            'corrective_action': forms.Textarea(attrs={'rows': 2}),
+            'preventive_action': forms.Textarea(attrs={'rows': 2}),
+            'notes': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.batch = kwargs.pop('batch', None)
+        super().__init__(*args, **kwargs)
+        self.fields['detected_at'].input_formats = ['%Y-%m-%dT%H:%M']
+        self.fields['defect_type'].queryset = DefectType.objects.filter(is_active=True)
+
+    def clean_defect_code(self):
+        defect_code = self.cleaned_data.get('defect_code')
+        if DefectRecord.objects.filter(
+                defect_code=defect_code
+        ).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError('该缺陷记录编号已存在')
+        return defect_code
+
+
+class FractureDiagnosisForm(forms.ModelForm):
+    class Meta:
+        model = FractureDiagnosis
+        fields = [
+            'diagnosis_code', 'source_test_type', 'source_test_id',
+            'fracture_mode', 'fracture_location', 'fracture_surface',
+            'primary_cause', 'root_cause_category', 'fracture_energy',
+            'crack_propagation_rate', 'fatigue_crack_initiation_cycles',
+            'diagnosis_conclusion', 'improvement_suggestions',
+            'diagnosed_by', 'notes'
+        ]
+        widgets = {
+            'fracture_surface': forms.Textarea(attrs={'rows': 2}),
+            'primary_cause': forms.Textarea(attrs={'rows': 3}),
+            'diagnosis_conclusion': forms.Textarea(attrs={'rows': 3}),
+            'improvement_suggestions': forms.Textarea(attrs={'rows': 2}),
+            'notes': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.batch = kwargs.pop('batch', None)
+        super().__init__(*args, **kwargs)
+
+    def clean_diagnosis_code(self):
+        diagnosis_code = self.cleaned_data.get('diagnosis_code')
+        if FractureDiagnosis.objects.filter(
+                diagnosis_code=diagnosis_code
+        ).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError('该诊断编号已存在')
+        return diagnosis_code
+
+
+class QualityIssueForm(forms.ModelForm):
+    class Meta:
+        model = QualityIssue
+        fields = [
+            'issue_code', 'issue_title', 'issue_type', 'priority',
+            'description', 'impact_analysis', 'root_cause',
+            'corrective_action', 'preventive_action',
+            'related_defect_types', 'related_recipes',
+            'raised_by', 'assigned_to', 'notes'
+        ]
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 3}),
+            'impact_analysis': forms.Textarea(attrs={'rows': 2}),
+            'root_cause': forms.Textarea(attrs={'rows': 2}),
+            'corrective_action': forms.Textarea(attrs={'rows': 2}),
+            'preventive_action': forms.Textarea(attrs={'rows': 2}),
+            'notes': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['related_defect_types'].queryset = DefectType.objects.filter(is_active=True)
+
+    def clean_issue_code(self):
+        issue_code = self.cleaned_data.get('issue_code')
+        if QualityIssue.objects.filter(
+                issue_code=issue_code
+        ).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError('该问题编号已存在')
+        return issue_code
+
+
+class ProcessRiskPointForm(forms.ModelForm):
+    class Meta:
+        model = ProcessRiskPoint
+        fields = [
+            'risk_code', 'risk_name', 'category', 'process_step',
+            'related_param', 'description', 'potential_consequences',
+            'likelihood', 'severity', 'detectability',
+            'control_measures', 'mitigation_plan', 'is_monitored',
+            'monitoring_method', 'related_defect_types',
+            'identified_by', 'notes'
+        ]
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 2}),
+            'potential_consequences': forms.Textarea(attrs={'rows': 2}),
+            'control_measures': forms.Textarea(attrs={'rows': 2}),
+            'mitigation_plan': forms.Textarea(attrs={'rows': 2}),
+            'notes': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.recipe = kwargs.pop('recipe', None)
+        super().__init__(*args, **kwargs)
+        self.fields['related_defect_types'].queryset = DefectType.objects.filter(is_active=True)
+
+    def clean(self):
+        cleaned_data = super().clean()
+        likelihood = cleaned_data.get('likelihood')
+        severity = cleaned_data.get('severity')
+        detectability = cleaned_data.get('detectability')
+
+        for field, value in [('likelihood', likelihood), ('severity', severity), ('detectability', detectability)]:
+            if value is not None and (value < 1 or value > 10):
+                self.add_error(field, '评分必须在1-10之间')
+
+        return cleaned_data
+
+
+class DefectResolveForm(forms.Form):
+    corrective_action = forms.CharField(
+        widget=forms.Textarea(attrs={'rows': 3}),
+        required=True,
+        label='纠正措施'
+    )
+    preventive_action = forms.CharField(
+        widget=forms.Textarea(attrs={'rows': 3}),
+        required=False,
+        label='预防措施'
+    )
+    resolver = forms.CharField(
+        max_length=100,
+        required=False,
+        label='处理人'
+    )
+    notes = forms.CharField(
+        widget=forms.Textarea(attrs={'rows': 2}),
+        required=False,
+        label='备注'
+    )
+
+
+class QualityIssueBatchForm(forms.Form):
+    batch = forms.ModelChoiceField(
+        queryset=MaterialBatch.objects.all(),
+        required=True,
+        label='材料批次'
+    )
+    impact_level = forms.ChoiceField(
+        choices=[
+            ('direct', '直接影响'),
+            ('indirect', '间接影响'),
+            ('potential', '潜在影响'),
+        ],
+        initial='potential',
+        required=True,
+        label='影响程度'
+    )
+    is_confirmed = forms.BooleanField(
+        required=False,
+        initial=False,
+        label='是否确认'
+    )
+    notes = forms.CharField(
+        widget=forms.Textarea(attrs={'rows': 2}),
+        required=False,
+        label='备注'
     )

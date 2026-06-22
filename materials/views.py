@@ -1,6 +1,7 @@
 import json
 import math
 
+from django.db import models as django_models
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
@@ -19,11 +20,17 @@ from .models import (
     ProcessRecipe, RecipeParam, PerformanceTarget,
     TrialPlan, TrialResult, RecipePrediction,
     RecipeComparison, OptimizationSuggestion,
+    DefectType, DefectRecord, FractureDiagnosis,
+    QualityIssue, QualityIssueBatch, ProcessRiskPoint,
+    QualityTrendRecord, TraceabilityLink,
 )
 from .forms import (
     MaterialBatchForm, TensionTestForm, FatigueTestForm,
     BatchReviewForm, AnomalyResolveForm, MaterialProcessParamForm,
     ProcessNoteForm,
+    DefectTypeForm, DefectRecordForm, DefectResolveForm,
+    FractureDiagnosisForm, QualityIssueForm, QualityIssueBatchForm,
+    ProcessRiskPointForm,
 )
 from .utils import (
     AnomalyDetector, StatisticsAnalyzer, ReboundRateCalculator,
@@ -2025,3 +2032,874 @@ class ApiRecipeVisualizationView(View):
             'prediction_history': history_data,
             'trial_performance': trial_performance,
         }, json_dumps_params={'ensure_ascii': False})
+
+
+class QualityTraceabilityDashboardView(View):
+    def get(self, request):
+        total_batches = MaterialBatch.objects.count()
+        total_defects = DefectRecord.objects.count()
+        total_fracture_diagnoses = FractureDiagnosis.objects.count()
+        total_quality_issues = QualityIssue.objects.count()
+        total_risk_points = ProcessRiskPoint.objects.count()
+
+        unresolved_defects = DefectRecord.objects.filter(
+            status__in=['detected', 'analyzing']
+        ).count()
+        open_quality_issues = QualityIssue.objects.filter(
+            status__in=['open', 'investigating']
+        ).count()
+        high_risk_points = ProcessRiskPoint.objects.filter(
+            risk_level__in=['high', 'critical']
+        ).count()
+
+        defect_by_category = {}
+        for cat_val, cat_label in DefectType.CATEGORY_CHOICES:
+            count = DefectRecord.objects.filter(
+                defect_type__category=cat_val
+            ).count()
+            defect_by_category[cat_val] = {
+                'label': cat_label,
+                'count': count,
+            }
+
+        defect_trend = []
+        recent_trends = QualityTrendRecord.objects.filter(
+            trend_type='daily'
+        ).order_by('record_date')[:30]
+        for trend in recent_trends:
+            defect_trend.append({
+                'date': trend.record_date.strftime('%Y-%m-%d'),
+                'defect_count': trend.defect_count,
+                'defect_rate': float(trend.defect_rate),
+                'fracture_count': trend.fracture_count,
+                'quality_score': float(trend.quality_score),
+            })
+
+        top_defect_types = []
+        for dt in DefectType.objects.filter(is_active=True).order_by('-defect_records')[:5]:
+            top_defect_types.append({
+                'code': dt.defect_code,
+                'name': dt.defect_name,
+                'count': dt.record_count,
+                'severity': dt.severity,
+                'category': dt.category,
+            })
+
+        recent_defects = DefectRecord.objects.all()[:10]
+        recent_diagnoses = FractureDiagnosis.objects.all()[:10]
+        recent_quality_issues = QualityIssue.objects.all()[:10]
+
+        context = {
+            'total_batches': total_batches,
+            'total_defects': total_defects,
+            'total_fracture_diagnoses': total_fracture_diagnoses,
+            'total_quality_issues': total_quality_issues,
+            'total_risk_points': total_risk_points,
+            'unresolved_defects': unresolved_defects,
+            'open_quality_issues': open_quality_issues,
+            'high_risk_points': high_risk_points,
+            'defect_by_category_json': json.dumps(defect_by_category, ensure_ascii=False),
+            'defect_trend_json': json.dumps(defect_trend, ensure_ascii=False),
+            'top_defect_types_json': json.dumps(top_defect_types, ensure_ascii=False),
+            'recent_defects': recent_defects,
+            'recent_diagnoses': recent_diagnoses,
+            'recent_quality_issues': recent_quality_issues,
+        }
+        return render(request, 'materials/quality_traceability_dashboard.html', context)
+
+
+class TraceabilityChainView(View):
+    def get(self, request, pk):
+        batch = get_object_or_404(MaterialBatch, pk=pk)
+
+        tension_tests = batch.tension_tests.all().order_by('-test_time')
+        fatigue_tests = batch.fatigue_tests.all().order_by('-test_time')
+        defect_records = batch.defect_records.all().order_by('-detected_at')
+        fracture_diagnoses = batch.fracture_diagnoses.all().order_by('-created_at')
+        quality_issues = batch.quality_issues.select_related('quality_issue').all()
+        process_params = batch.process_params.all()
+        flow_records = batch.flow_records.all()
+        life_predictions = batch.life_predictions.filter(is_latest=True)
+        trial_plans = batch.trial_plans.all().select_related('recipe').order_by('-created_at')
+
+        chain_nodes = []
+
+        chain_nodes.append({
+            'type': 'material',
+            'title': '原材料批次',
+            'subtitle': batch.batch_number,
+            'description': f'来源: {batch.material_source}, 直径: {batch.diameter}mm, 长度: {batch.initial_length}mm',
+            'time': batch.created_at.strftime('%Y-%m-%d %H:%M'),
+            'status': batch.status,
+        })
+
+        for tp in process_params:
+            chain_nodes.append({
+                'type': 'process',
+                'title': f'工艺参数: {tp.param_name}',
+                'subtitle': tp.get_param_type_display(),
+                'description': f'{tp.param_value}{tp.param_unit}',
+                'time': tp.created_at.strftime('%Y-%m-%d %H:%M'),
+                'status': 'normal',
+            })
+
+        for trial in trial_plans:
+            chain_nodes.append({
+                'type': 'trial',
+                'title': f'试制方案: {trial.plan_name}',
+                'subtitle': trial.get_trial_type_display(),
+                'description': f'状态: {trial.get_status_display()}, 配方: {trial.recipe.recipe_name if trial.recipe else "N/A"}',
+                'time': trial.created_at.strftime('%Y-%m-%d %H:%M'),
+                'status': trial.status,
+            })
+
+        for test in tension_tests:
+            chain_nodes.append({
+                'type': 'test',
+                'title': f'拉伸测试 #{test.pk}',
+                'subtitle': '拉伸测试',
+                'description': f'拉力: {test.tension_force}N, 伸长: {test.elongation}mm, 状态: {"断裂" if test.is_broken else "正常"}',
+                'time': test.test_time.strftime('%Y-%m-%d %H:%M'),
+                'status': 'broken' if test.is_broken else 'normal',
+            })
+
+        for test in fatigue_tests:
+            chain_nodes.append({
+                'type': 'test',
+                'title': f'疲劳测试 #{test.pk}',
+                'subtitle': '疲劳测试',
+                'description': f'载荷: {test.load_force}N, 循环: {test.cycle_count}次, 结果: {test.get_result_display()}',
+                'time': test.test_time.strftime('%Y-%m-%d %H:%M'),
+                'status': 'broken' if test.result == 'broken' else 'normal',
+            })
+
+        for defect in defect_records:
+            chain_nodes.append({
+                'type': 'defect',
+                'title': f'缺陷记录: {defect.defect_code}',
+                'subtitle': defect.defect_type.defect_name if defect.defect_type else '未分类',
+                'description': f'状态: {defect.get_status_display()}, 严重程度: {defect.get_severity_assessment_display()}',
+                'time': defect.detected_at.strftime('%Y-%m-%d %H:%M'),
+                'status': defect.status,
+            })
+
+        for diagnosis in fracture_diagnoses:
+            chain_nodes.append({
+                'type': 'diagnosis',
+                'title': f'断裂诊断: {diagnosis.diagnosis_code}',
+                'subtitle': diagnosis.get_fracture_mode_display(),
+                'description': f'状态: {diagnosis.get_diagnosis_status_display()}',
+                'time': diagnosis.created_at.strftime('%Y-%m-%d %H:%M'),
+                'status': diagnosis.diagnosis_status,
+            })
+
+        chain_nodes.sort(key=lambda x: x['time'])
+
+        context = {
+            'batch': batch,
+            'chain_nodes': chain_nodes,
+            'tension_tests': tension_tests,
+            'fatigue_tests': fatigue_tests,
+            'defect_records': defect_records,
+            'fracture_diagnoses': fracture_diagnoses,
+            'quality_issues': quality_issues,
+            'process_params': process_params,
+            'life_predictions': life_predictions,
+            'trial_plans': trial_plans,
+            'chain_nodes_json': json.dumps(chain_nodes, ensure_ascii=False),
+        }
+        return render(request, 'materials/traceability_chain.html', context)
+
+
+class DefectTypeListView(ListView):
+    model = DefectType
+    template_name = 'materials/defect_type_list.html'
+    context_object_name = 'defect_types'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = DefectType.objects.all()
+        q = self.request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                defect_code__icontains=q
+            ) | queryset.filter(
+                defect_name__icontains=q
+            )
+        category = self.request.GET.get('category')
+        if category:
+            queryset = queryset.filter(category=category)
+        severity = self.request.GET.get('severity')
+        if severity:
+            queryset = queryset.filter(severity=severity)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['q'] = self.request.GET.get('q', '')
+        context['category_filter'] = self.request.GET.get('category', '')
+        context['severity_filter'] = self.request.GET.get('severity', '')
+        context['category_choices'] = DefectType.CATEGORY_CHOICES
+        context['severity_choices'] = DefectType.SEVERITY_CHOICES
+        context['defect_type_summary'] = {
+            'total': DefectType.objects.count(),
+            'active': DefectType.objects.filter(is_active=True).count(),
+        }
+        return context
+
+
+class DefectTypeCreateView(CreateView):
+    model = DefectType
+    form_class = DefectTypeForm
+    template_name = 'materials/defect_type_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:defect_type_list')
+
+    def form_valid(self, form):
+        messages.success(self.request, '缺陷类型创建成功')
+        return super().form_valid(form)
+
+
+class DefectTypeUpdateView(UpdateView):
+    model = DefectType
+    form_class = DefectTypeForm
+    template_name = 'materials/defect_type_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:defect_type_list')
+
+    def form_valid(self, form):
+        messages.success(self.request, '缺陷类型更新成功')
+        return super().form_valid(form)
+
+
+class DefectTypeDeleteView(DeleteView):
+    model = DefectType
+    template_name = 'materials/defect_type_confirm_delete.html'
+
+    def get_success_url(self):
+        return reverse('materials:defect_type_list')
+
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, '缺陷类型删除成功')
+        return super().delete(request, *args, **kwargs)
+
+
+class DefectRecordListView(ListView):
+    model = DefectRecord
+    template_name = 'materials/defect_record_list.html'
+    context_object_name = 'defect_records'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = DefectRecord.objects.select_related('batch', 'defect_type').all()
+        q = self.request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                defect_code__icontains=q
+            ) | queryset.filter(
+                description__icontains=q
+            ) | queryset.filter(
+                batch__batch_number__icontains=q
+            )
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+        source_type = self.request.GET.get('source')
+        if source_type:
+            queryset = queryset.filter(source_type=source_type)
+        severity = self.request.GET.get('severity')
+        if severity:
+            queryset = queryset.filter(severity_assessment=severity)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['q'] = self.request.GET.get('q', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['source_filter'] = self.request.GET.get('source', '')
+        context['severity_filter'] = self.request.GET.get('severity', '')
+        context['status_choices'] = DefectRecord.STATUS_CHOICES
+        context['source_choices'] = DefectRecord.SOURCE_CHOICES
+        context['severity_choices'] = DefectType.SEVERITY_CHOICES
+        context['defect_summary'] = {
+            'total': DefectRecord.objects.count(),
+            'detected': DefectRecord.objects.filter(status='detected').count(),
+            'analyzing': DefectRecord.objects.filter(status='analyzing').count(),
+            'resolved': DefectRecord.objects.filter(status='resolved').count(),
+            'closed': DefectRecord.objects.filter(status='closed').count(),
+        }
+        return context
+
+
+class DefectRecordDetailView(DetailView):
+    model = DefectRecord
+    template_name = 'materials/defect_record_detail.html'
+    context_object_name = 'defect_record'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        defect = self.object
+        context['batch'] = defect.batch
+        return context
+
+
+class DefectRecordCreateView(CreateView):
+    model = DefectRecord
+    form_class = DefectRecordForm
+    template_name = 'materials/defect_record_form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        batch_pk = self.kwargs.get('batch_pk')
+        if batch_pk:
+            kwargs['batch'] = get_object_or_404(MaterialBatch, pk=batch_pk)
+        return kwargs
+
+    def form_valid(self, form):
+        batch_pk = self.kwargs.get('batch_pk')
+        if batch_pk:
+            form.instance.batch = get_object_or_404(MaterialBatch, pk=batch_pk)
+        messages.success(self.request, '缺陷记录创建成功')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('materials:defect_record_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        batch_pk = self.kwargs.get('batch_pk')
+        if batch_pk:
+            context['batch'] = get_object_or_404(MaterialBatch, pk=batch_pk)
+        return context
+
+
+class DefectRecordUpdateView(UpdateView):
+    model = DefectRecord
+    form_class = DefectRecordForm
+    template_name = 'materials/defect_record_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:defect_record_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        messages.success(self.request, '缺陷记录更新成功')
+        return super().form_valid(form)
+
+
+class DefectRecordResolveView(View):
+    def get(self, request, pk):
+        defect = get_object_or_404(DefectRecord, pk=pk)
+        form = DefectResolveForm()
+        context = {
+            'defect': defect,
+            'form': form,
+        }
+        return render(request, 'materials/defect_record_resolve.html', context)
+
+    def post(self, request, pk):
+        defect = get_object_or_404(DefectRecord, pk=pk)
+        form = DefectResolveForm(request.POST)
+        if form.is_valid():
+            defect.resolve(
+                resolver=form.cleaned_data['resolver'],
+                corrective=form.cleaned_data['corrective_action'],
+                preventive=form.cleaned_data['preventive_action'],
+                notes=form.cleaned_data['notes'],
+            )
+            messages.success(request, '缺陷处理完成')
+            return redirect('materials:defect_record_detail', pk=pk)
+        context = {
+            'defect': defect,
+            'form': form,
+        }
+        return render(request, 'materials/defect_record_resolve.html', context)
+
+
+class FractureDiagnosisListView(ListView):
+    model = FractureDiagnosis
+    template_name = 'materials/fracture_diagnosis_list.html'
+    context_object_name = 'diagnoses'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = FractureDiagnosis.objects.select_related('batch').all()
+        q = self.request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                diagnosis_code__icontains=q
+            ) | queryset.filter(
+                batch__batch_number__icontains=q
+            )
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(diagnosis_status=status)
+        fracture_mode = self.request.GET.get('mode')
+        if fracture_mode:
+            queryset = queryset.filter(fracture_mode=fracture_mode)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['q'] = self.request.GET.get('q', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['mode_filter'] = self.request.GET.get('mode', '')
+        context['status_choices'] = FractureDiagnosis.DIAGNOSIS_STATUS_CHOICES
+        context['mode_choices'] = FractureDiagnosis.FRACTURE_MODE_CHOICES
+        context['diagnosis_summary'] = {
+            'total': FractureDiagnosis.objects.count(),
+            'pending': FractureDiagnosis.objects.filter(diagnosis_status='pending').count(),
+            'in_progress': FractureDiagnosis.objects.filter(diagnosis_status='in_progress').count(),
+            'completed': FractureDiagnosis.objects.filter(diagnosis_status='completed').count(),
+        }
+        return context
+
+
+class FractureDiagnosisDetailView(DetailView):
+    model = FractureDiagnosis
+    template_name = 'materials/fracture_diagnosis_detail.html'
+    context_object_name = 'diagnosis'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        diagnosis = self.object
+        context['batch'] = diagnosis.batch
+        return context
+
+
+class FractureDiagnosisCreateView(CreateView):
+    model = FractureDiagnosis
+    form_class = FractureDiagnosisForm
+    template_name = 'materials/fracture_diagnosis_form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        batch_pk = self.kwargs.get('batch_pk')
+        if batch_pk:
+            kwargs['batch'] = get_object_or_404(MaterialBatch, pk=batch_pk)
+        return kwargs
+
+    def form_valid(self, form):
+        batch_pk = self.kwargs.get('batch_pk')
+        if batch_pk:
+            form.instance.batch = get_object_or_404(MaterialBatch, pk=batch_pk)
+        messages.success(self.request, '断裂诊断记录创建成功')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('materials:fracture_diagnosis_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        batch_pk = self.kwargs.get('batch_pk')
+        if batch_pk:
+            context['batch'] = get_object_or_404(MaterialBatch, pk=batch_pk)
+        return context
+
+
+class FractureDiagnosisUpdateView(UpdateView):
+    model = FractureDiagnosis
+    form_class = FractureDiagnosisForm
+    template_name = 'materials/fracture_diagnosis_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:fracture_diagnosis_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        messages.success(self.request, '断裂诊断记录更新成功')
+        return super().form_valid(form)
+
+
+class FractureDiagnosisCompleteView(View):
+    def post(self, request, pk):
+        diagnosis = get_object_or_404(FractureDiagnosis, pk=pk)
+        diagnosis.complete_diagnosis(
+            diagnosis_conclusion=request.POST.get('diagnosis_conclusion', ''),
+            improvement_suggestions=request.POST.get('improvement_suggestions', ''),
+            diagnosed_by=request.POST.get('diagnosed_by', ''),
+        )
+        messages.success(request, '断裂诊断完成')
+        return redirect('materials:fracture_diagnosis_detail', pk=pk)
+
+
+class QualityIssueListView(ListView):
+    model = QualityIssue
+    template_name = 'materials/quality_issue_list.html'
+    context_object_name = 'quality_issues'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = QualityIssue.objects.prefetch_related('affected_batches').all()
+        q = self.request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                issue_code__icontains=q
+            ) | queryset.filter(
+                issue_title__icontains=q
+            )
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+        issue_type = self.request.GET.get('type')
+        if issue_type:
+            queryset = queryset.filter(issue_type=issue_type)
+        priority = self.request.GET.get('priority')
+        if priority:
+            queryset = queryset.filter(priority=priority)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['q'] = self.request.GET.get('q', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['type_filter'] = self.request.GET.get('type', '')
+        context['priority_filter'] = self.request.GET.get('priority', '')
+        context['status_choices'] = QualityIssue.STATUS_CHOICES
+        context['type_choices'] = QualityIssue.ISSUE_TYPE_CHOICES
+        context['priority_choices'] = QualityIssue.PRIORITY_CHOICES
+        context['issue_summary'] = {
+            'total': QualityIssue.objects.count(),
+            'open': QualityIssue.objects.filter(status='open').count(),
+            'investigating': QualityIssue.objects.filter(status='investigating').count(),
+            'resolved': QualityIssue.objects.filter(status='resolved').count(),
+            'closed': QualityIssue.objects.filter(status='closed').count(),
+            'critical': QualityIssue.objects.filter(priority='critical').count(),
+        }
+        return context
+
+
+class QualityIssueDetailView(DetailView):
+    model = QualityIssue
+    template_name = 'materials/quality_issue_detail.html'
+    context_object_name = 'quality_issue'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        issue = self.object
+        context['affected_batches'] = issue.affected_batches.select_related('batch').all()
+        context['related_defect_types'] = issue.related_defect_types.all()
+        context['related_recipes'] = issue.related_recipes.all()
+        return context
+
+
+class QualityIssueCreateView(CreateView):
+    model = QualityIssue
+    form_class = QualityIssueForm
+    template_name = 'materials/quality_issue_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:quality_issue_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        messages.success(self.request, '质量问题创建成功')
+        return super().form_valid(form)
+
+
+class QualityIssueUpdateView(UpdateView):
+    model = QualityIssue
+    form_class = QualityIssueForm
+    template_name = 'materials/quality_issue_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:quality_issue_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        messages.success(self.request, '质量问题更新成功')
+        return super().form_valid(form)
+
+
+class QualityIssueAddBatchView(View):
+    def get(self, request, pk):
+        issue = get_object_or_404(QualityIssue, pk=pk)
+        form = QualityIssueBatchForm()
+        context = {
+            'quality_issue': issue,
+            'form': form,
+        }
+        return render(request, 'materials/quality_issue_add_batch.html', context)
+
+    def post(self, request, pk):
+        issue = get_object_or_404(QualityIssue, pk=pk)
+        form = QualityIssueBatchForm(request.POST)
+        if form.is_valid():
+            batch = form.cleaned_data['batch']
+            if not QualityIssueBatch.objects.filter(quality_issue=issue, batch=batch).exists():
+                QualityIssueBatch.objects.create(
+                    quality_issue=issue,
+                    batch=batch,
+                    impact_level=form.cleaned_data['impact_level'],
+                    is_confirmed=form.cleaned_data['is_confirmed'],
+                    notes=form.cleaned_data['notes'],
+                )
+                messages.success(request, '批次添加成功')
+            else:
+                messages.warning(request, '该批次已关联到此质量问题')
+            return redirect('materials:quality_issue_detail', pk=pk)
+        context = {
+            'quality_issue': issue,
+            'form': form,
+        }
+        return render(request, 'materials/quality_issue_add_batch.html', context)
+
+
+class QualityIssueRemoveBatchView(View):
+    def post(self, request, pk, batch_id):
+        issue = get_object_or_404(QualityIssue, pk=pk)
+        try:
+            qib = QualityIssueBatch.objects.get(quality_issue=issue, batch_id=batch_id)
+            qib.delete()
+            messages.success(request, '批次移除成功')
+        except QualityIssueBatch.DoesNotExist:
+            messages.warning(request, '关联记录不存在')
+        return redirect('materials:quality_issue_detail', pk=pk)
+
+
+class ProcessRiskPointListView(ListView):
+    model = ProcessRiskPoint
+    template_name = 'materials/process_risk_point_list.html'
+    context_object_name = 'risk_points'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = ProcessRiskPoint.objects.select_related('recipe').all()
+        q = self.request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                risk_code__icontains=q
+            ) | queryset.filter(
+                risk_name__icontains=q
+            ) | queryset.filter(
+                recipe__recipe_code__icontains=q
+            )
+        category = self.request.GET.get('category')
+        if category:
+            queryset = queryset.filter(category=category)
+        risk_level = self.request.GET.get('level')
+        if risk_level:
+            queryset = queryset.filter(risk_level=risk_level)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['q'] = self.request.GET.get('q', '')
+        context['category_filter'] = self.request.GET.get('category', '')
+        context['level_filter'] = self.request.GET.get('level', '')
+        context['category_choices'] = ProcessRiskPoint.CATEGORY_CHOICES
+        context['level_choices'] = ProcessRiskPoint.RISK_LEVEL_CHOICES
+
+        total = ProcessRiskPoint.objects.count()
+        context['risk_summary'] = {
+            'total': total,
+            'low': ProcessRiskPoint.objects.filter(risk_level='low').count(),
+            'medium': ProcessRiskPoint.objects.filter(risk_level='medium').count(),
+            'high': ProcessRiskPoint.objects.filter(risk_level='high').count(),
+            'critical': ProcessRiskPoint.objects.filter(risk_level='critical').count(),
+            'monitored': ProcessRiskPoint.objects.filter(is_monitored=True).count(),
+        }
+
+        top_risks = ProcessRiskPoint.objects.order_by('-risk_score')[:10]
+        risk_chart_data = []
+        for r in top_risks:
+            risk_chart_data.append({
+                'name': r.risk_name,
+                'score': float(r.risk_score),
+                'level': r.risk_level,
+                'category': r.get_category_display(),
+            })
+        context['risk_chart_data_json'] = json.dumps(risk_chart_data, ensure_ascii=False)
+
+        return context
+
+
+class ProcessRiskPointDetailView(DetailView):
+    model = ProcessRiskPoint
+    template_name = 'materials/process_risk_point_detail.html'
+    context_object_name = 'risk_point'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        risk = self.object
+        context['recipe'] = risk.recipe
+        context['related_defects'] = risk.related_defect_types.all()
+        return context
+
+
+class ProcessRiskPointCreateView(CreateView):
+    model = ProcessRiskPoint
+    form_class = ProcessRiskPointForm
+    template_name = 'materials/process_risk_point_form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        recipe_pk = self.kwargs.get('recipe_pk')
+        if recipe_pk:
+            kwargs['recipe'] = get_object_or_404(ProcessRecipe, pk=recipe_pk)
+        return kwargs
+
+    def form_valid(self, form):
+        recipe_pk = self.kwargs.get('recipe_pk')
+        if recipe_pk:
+            form.instance.recipe = get_object_or_404(ProcessRecipe, pk=recipe_pk)
+        messages.success(self.request, '工艺风险点创建成功')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('materials:process_risk_point_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        recipe_pk = self.kwargs.get('recipe_pk')
+        if recipe_pk:
+            context['recipe'] = get_object_or_404(ProcessRecipe, pk=recipe_pk)
+        return context
+
+
+class ProcessRiskPointUpdateView(UpdateView):
+    model = ProcessRiskPoint
+    form_class = ProcessRiskPointForm
+    template_name = 'materials/process_risk_point_form.html'
+
+    def get_success_url(self):
+        return reverse('materials:process_risk_point_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        messages.success(self.request, '工艺风险点更新成功')
+        return super().form_valid(form)
+
+
+class QualityTrendView(View):
+    def get(self, request):
+        trend_type = request.GET.get('type', 'daily')
+
+        trends = QualityTrendRecord.objects.filter(
+            trend_type=trend_type
+        ).order_by('record_date')[:60]
+
+        chart_data = []
+        for t in trends:
+            chart_data.append({
+                'date': t.record_date.strftime('%Y-%m-%d'),
+                'total_batches': t.total_batches,
+                'new_batches': t.new_batches,
+                'defect_count': t.defect_count,
+                'defect_rate': float(t.defect_rate),
+                'fracture_count': t.fracture_count,
+                'fracture_rate': float(t.fracture_rate),
+                'quality_score': float(t.quality_score),
+                'avg_durability': float(t.avg_durability_score) if t.avg_durability_score else None,
+                'avg_stability': float(t.avg_stability_score) if t.avg_stability_score else None,
+                'avg_rebound': float(t.avg_rebound_rate) if t.avg_rebound_rate else None,
+                'open_issues': t.open_quality_issues,
+                'resolved_issues': t.resolved_quality_issues,
+            })
+
+        summary = {
+            'total_batches': MaterialBatch.objects.count(),
+            'total_defects': DefectRecord.objects.count(),
+            'total_diagnoses': FractureDiagnosis.objects.count(),
+            'total_issues': QualityIssue.objects.count(),
+        }
+
+        category_distribution = {}
+        for cat_val, cat_label in DefectType.CATEGORY_CHOICES:
+            count = DefectRecord.objects.filter(defect_type__category=cat_val).count()
+            category_distribution[cat_val] = {
+                'label': cat_label,
+                'count': count,
+            }
+
+        context = {
+            'trends': trends,
+            'trend_type': trend_type,
+            'chart_data_json': json.dumps(chart_data, ensure_ascii=False),
+            'summary': summary,
+            'category_distribution_json': json.dumps(category_distribution, ensure_ascii=False),
+            'trend_type_choices': QualityTrendRecord.TREND_TYPE_CHOICES,
+        }
+        return render(request, 'materials/quality_trend.html', context)
+
+
+class ApiQualityDashboardView(View):
+    def get(self, request):
+        data = {
+            'total_batches': MaterialBatch.objects.count(),
+            'total_defects': DefectRecord.objects.count(),
+            'total_diagnoses': FractureDiagnosis.objects.count(),
+            'total_issues': QualityIssue.objects.count(),
+            'total_risk_points': ProcessRiskPoint.objects.count(),
+            'unresolved_defects': DefectRecord.objects.filter(
+                status__in=['detected', 'analyzing']
+            ).count(),
+            'open_issues': QualityIssue.objects.filter(
+                status__in=['open', 'investigating']
+            ).count(),
+            'high_risk_points': ProcessRiskPoint.objects.filter(
+                risk_level__in=['high', 'critical']
+            ).count(),
+        }
+        return JsonResponse({'success': True, 'data': data})
+
+
+class ApiDefectDistributionView(View):
+    def get(self, request):
+        by_category = {}
+        for cat_val, cat_label in DefectType.CATEGORY_CHOICES:
+            count = DefectRecord.objects.filter(defect_type__category=cat_val).count()
+            by_category[cat_val] = {'label': cat_label, 'count': count}
+
+        by_severity = {}
+        for sev_val, sev_label in DefectType.SEVERITY_CHOICES:
+            count = DefectRecord.objects.filter(severity_assessment=sev_val).count()
+            by_severity[sev_val] = {'label': sev_label, 'count': count}
+
+        by_source = {}
+        for src_val, src_label in DefectRecord.SOURCE_CHOICES:
+            count = DefectRecord.objects.filter(source_type=src_val).count()
+            by_source[src_val] = {'label': src_label, 'count': count}
+
+        return JsonResponse({
+            'success': True,
+            'by_category': by_category,
+            'by_severity': by_severity,
+            'by_source': by_source,
+        })
+
+
+class ApiRiskAnalysisView(View):
+    def get(self, request):
+        top_risks = ProcessRiskPoint.objects.order_by('-risk_score')[:20]
+        risk_list = []
+        for r in top_risks:
+            risk_list.append({
+                'id': r.pk,
+                'code': r.risk_code,
+                'name': r.risk_name,
+                'recipe_code': r.recipe.recipe_code,
+                'category': r.get_category_display(),
+                'risk_level': r.risk_level,
+                'risk_score': float(r.risk_score),
+                'likelihood': float(r.likelihood),
+                'severity': float(r.severity),
+                'detectability': float(r.detectability),
+                'process_step': r.process_step,
+                'incident_count': r.incident_count,
+            })
+
+        by_category = {}
+        for cat_val, cat_label in ProcessRiskPoint.CATEGORY_CHOICES:
+            avg_score = 0
+            risks = ProcessRiskPoint.objects.filter(category=cat_val)
+            if risks.exists():
+                avg_score = risks.aggregate(django_models.Avg('risk_score'))['risk_score__avg'] or 0
+            by_category[cat_val] = {
+                'label': cat_label,
+                'count': risks.count(),
+                'avg_risk_score': float(avg_score),
+            }
+
+        return JsonResponse({
+            'success': True,
+            'top_risks': risk_list,
+            'by_category': by_category,
+        })

@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+
+{% block title %}{% if object %}编辑{% else %}新增{% endif %}缺陷记录{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{% if object %}✏️ 编辑缺陷记录{% else %}➕ 新增缺陷记录{% endif %}</h1>
+    <div class="actions-row">
+        <a href="{% if batch %}{% url 'materials:batch_detail' batch.pk %}{% else %}{% url 'materials:defect_record_list' %}{% endif %}" class="btn btn-secondary">返回</a>
+    </div>
+</div>
+
+<div class="card">
+    <form method="post">
+        {% csrf_token %}
+        
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="{{ form.batch.id_for_label }}">材料批次 *</label>
+                {{ form.batch }}
+                {% if form.batch.errors %}
+                <div class="form-error">{{ form.batch.errors.0 }}</div>
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="{{ form.defect_type.id_for_label }}">缺陷类型</label>
+                {{ form.defect_type }}
+                {% if form.defect_type.errors %}
+                <div class="form-error">{{ form.defect_type.errors.0 }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="{{ form.detection_source.id_for_label }}">发现来源 *</label>
+                {{ form.detection_source }}
+                {% if form.detection_source.errors %}
+                <div class="form-error">{{ form.detection_source.errors.0 }}</div>
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="{{ form.severity_assessment.id_for_label }}">严重程度评估</label>
+                {{ form.severity_assessment }}
+                {% if form.severity_assessment.errors %}
+                <div class="form-error">{{ form.severity_assessment.errors.0 }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="{{ form.defect_location.id_for_label }}">缺陷位置</label>
+                {{ form.defect_location }}
+                {% if form.defect_location.errors %}
+                <div class="form-error">{{ form.defect_location.errors.0 }}</div>
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="{{ form.defect_size.id_for_label }}">缺陷尺寸</label>
+                {{ form.defect_size }}
+                {% if form.defect_size.errors %}
+                <div class="form-error">{{ form.defect_size.errors.0 }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="{{ form.defect_count.id_for_label }}">缺陷数量</label>
+                {{ form.defect_count }}
+                {% if form.defect_count.errors %}
+                <div class="form-error">{{ form.defect_count.errors.0 }}</div>
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="{{ form.affected_samples.id_for_label }}">受影响样本数</label>
+                {{ form.affected_samples }}
+                {% if form.affected_samples.errors %}
+                <div class="form-error">{{ form.affected_samples.errors.0 }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="{{ form.defect_description.id_for_label }}">缺陷描述</label>
+            {{ form.defect_description }}
+            {% if form.defect_description.errors %}
+            <div class="form-error">{{ form.defect_description.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="{{ form.detected_by.id_for_label }}">发现人</label>
+                {{ form.detected_by }}
+                {% if form.detected_by.errors %}
+                <div class="form-error">{{ form.detected_by.errors.0 }}</div>
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="{{ form.detected_at.id_for_label }}">发现时间</label>
+                {{ form.detected_at }}
+                {% if form.detected_at.errors %}
+                <div class="form-error">{{ form.detected_at.errors.0 }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <a href="{% if batch %}{% url 'materials:batch_detail' batch.pk %}{% else %}{% url 'materials:defect_record_list' %}{% endif %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

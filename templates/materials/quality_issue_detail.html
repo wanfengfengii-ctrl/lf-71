@@ -1,0 +1,204 @@
+{% extends 'base.html' %}
+
+{% block title %}质量问题详情 - {{ quality_issue.issue_code }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>⚠️ 质量问题详情 - {{ quality_issue.issue_code }}</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:quality_issue_list' %}" class="btn btn-secondary">返回列表</a>
+        {% if quality_issue.status != 'closed' %}
+        <a href="{% url 'materials:quality_issue_edit' quality_issue.pk %}" class="btn btn-primary">编辑</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">基本信息</div>
+        <div class="detail-grid">
+            <div class="detail-item">
+                <div class="label">问题编号</div>
+                <div class="value"><strong>{{ quality_issue.issue_code }}</strong></div>
+            </div>
+            <div class="detail-item">
+                <div class="label">问题标题</div>
+                <div class="value">{{ quality_issue.issue_title }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">问题类型</div>
+                <div class="value">{{ quality_issue.get_issue_type_display }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">优先级</div>
+                <div class="value"><span class="badge {{ quality_issue.priority_color_class }}">{{ quality_issue.get_priority_display }}</span></div>
+            </div>
+            <div class="detail-item">
+                <div class="label">状态</div>
+                <div class="value"><span class="badge {{ quality_issue.status_color_class }}">{{ quality_issue.get_status_display }}</span></div>
+            </div>
+            <div class="detail-item">
+                <div class="label">创建时间</div>
+                <div class="value">{{ quality_issue.created_at|date:"Y-m-d H:i" }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">提出人</div>
+                <div class="value">{{ quality_issue.raised_by|default:"-" }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">负责人</div>
+                <div class="value">{{ quality_issue.assigned_to|default:"-" }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">关联信息</div>
+        <div class="detail-grid">
+            <div class="detail-item">
+                <div class="label">关联缺陷类型</div>
+                <div class="value">
+                    {% if related_defect_types %}
+                        {% for dt in related_defect_types %}
+                        <span class="badge badge-info" style="margin-right: 4px; margin-bottom: 4px;">{{ dt.defect_name }}</span>
+                        {% endfor %}
+                    {% else %}
+                    -
+                    {% endif %}
+                </div>
+            </div>
+            <div class="detail-item">
+                <div class="label">关联工艺配方</div>
+                <div class="value">
+                    {% if related_recipes %}
+                        {% for recipe in related_recipes %}
+                        <span class="badge badge-info" style="margin-right: 4px; margin-bottom: 4px;">{{ recipe.recipe_code }}</span>
+                        {% endfor %}
+                    {% else %}
+                    -
+                    {% endif %}
+                </div>
+            </div>
+            <div class="detail-item">
+                <div class="label">关联批次数</div>
+                <div class="value">{{ quality_issue.affected_batch_count }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">问题描述</div>
+    <p>{{ quality_issue.description|default:"暂无描述"|linebreaks }}</p>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">影响分析</div>
+        <p>{{ quality_issue.impact_analysis|default:"暂无分析"|linebreaks }}</p>
+    </div>
+    <div class="card">
+        <div class="card-title">根本原因</div>
+        <p>{{ quality_issue.root_cause|default:"暂无分析"|linebreaks }}</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>关联批次列表</span>
+        {% if quality_issue.status != 'closed' %}
+        <a href="{% url 'materials:quality_issue_add_batch' quality_issue.pk %}" class="btn btn-sm btn-primary">添加批次</a>
+        {% endif %}
+    </div>
+    
+    {% if affected_batches %}
+    <table>
+        <thead>
+            <tr>
+                <th>批次号</th>
+                <th>影响程度</th>
+                <th>是否确认</th>
+                <th>关联时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ab in affected_batches %}
+            <tr>
+                <td><a href="{% url 'materials:batch_detail' ab.batch.pk %}"><strong>{{ ab.batch.batch_number }}</strong></a></td>
+                <td>{{ ab.get_impact_level_display }}</td>
+                <td>
+                    {% if ab.is_confirmed %}
+                    <span class="badge badge-success">已确认</span>
+                    {% else %}
+                    <span class="badge badge-warning">待确认</span>
+                    {% endif %}
+                </td>
+                <td>{{ ab.created_at|date:"Y-m-d" }}</td>
+                <td>
+                    <a href="{% url 'materials:batch_detail' ab.batch.pk %}" class="btn btn-sm btn-primary">查看批次</a>
+                    {% if quality_issue.status != 'closed' %}
+                    <a href="{% url 'materials:quality_issue_remove_batch' quality_issue.pk ab.pk %}" class="btn btn-sm btn-danger" onclick="return confirm('确定要移除该批次吗？');">移除</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无关联批次</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">纠正措施</div>
+        <p>{{ quality_issue.corrective_action|default:"暂无措施"|linebreaks }}</p>
+    </div>
+    <div class="card">
+        <div class="card-title">预防措施</div>
+        <p>{{ quality_issue.preventive_action|default:"暂无措施"|linebreaks }}</p>
+    </div>
+</div>
+
+{% if quality_issue.resolved_at %}
+<div class="card green">
+    <div class="card-title">解决信息</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <div class="label">解决时间</div>
+            <div class="value">{{ quality_issue.resolved_at|date:"Y-m-d H:i" }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">解决人</div>
+            <div class="value">{{ quality_issue.resolved_by|default:"-" }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if quality_issue.closed_at %}
+<div class="card green">
+    <div class="card-title">关闭信息</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <div class="label">关闭时间</div>
+            <div class="value">{{ quality_issue.closed_at|date:"Y-m-d H:i" }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="label">关闭人</div>
+            <div class="value">{{ quality_issue.closed_by|default:"-" }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if quality_issue.notes %}
+<div class="card">
+    <div class="card-title">备注</div>
+    <p>{{ quality_issue.notes|linebreaks }}</p>
+</div>
+{% endif %}
+{% endblock %}

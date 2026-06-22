@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block title %}处理缺陷 - {{ object.defect_code }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>✅ 处理缺陷 - {{ object.defect_code }}</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:defect_record_detail' object.pk %}" class="btn btn-secondary">返回详情</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">缺陷信息</div>
+    <div class="info-grid">
+        <div class="info-item">
+            <span class="info-label">缺陷编号</span>
+            <span class="info-value"><strong>{{ object.defect_code }}</strong></span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">缺陷类型</span>
+            <span class="info-value">{{ object.defect_type.defect_name|default:"未分类" }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">关联批次</span>
+            <span class="info-value">{{ object.batch.batch_number }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">严重程度</span>
+            <span class="badge {{ object.severity_color_class }}">{{ object.get_severity_assessment_display }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <form method="post">
+        {% csrf_token %}
+        
+        <div class="form-group">
+            <label for="{{ form.status.id_for_label }}">处理状态</label>
+            {{ form.status }}
+            {% if form.status.errors %}
+            <div class="form-error">{{ form.status.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="{{ form.root_cause.id_for_label }}">根本原因分析</label>
+            {{ form.root_cause }}
+            {% if form.root_cause.errors %}
+            <div class="form-error">{{ form.root_cause.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="{{ form.corrective_action.id_for_label }}">纠正措施</label>
+            {{ form.corrective_action }}
+            {% if form.corrective_action.errors %}
+            <div class="form-error">{{ form.corrective_action.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="{{ form.preventive_action.id_for_label }}">预防措施</label>
+            {{ form.preventive_action }}
+            {% if form.preventive_action.errors %}
+            <div class="form-error">{{ form.preventive_action.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="{{ form.verification_result.id_for_label }}">验证结果</label>
+            {{ form.verification_result }}
+            {% if form.verification_result.errors %}
+            <div class="form-error">{{ form.verification_result.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="{{ form.close_note.id_for_label }}">关闭备注</label>
+            {{ form.close_note }}
+            {% if form.close_note.errors %}
+            <div class="form-error">{{ form.close_note.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">提交处理</button>
+            <a href="{% url 'materials:defect_record_detail' object.pk %}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

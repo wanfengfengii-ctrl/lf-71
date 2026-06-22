@@ -1,11 +1,16 @@
 import math
-from datetime import date
+from datetime import date, timedelta
 from collections import defaultdict
+from django.db.models import Sum
 from .models import (
     MaterialBatch, TensionTest, FatigueTest, DataAnomalyLog,
     StatisticalSnapshot, BreakageFlowRecord,
     BowType, LifePrediction, MaterialRecommendation,
     BowTypeMatching, BatchRanking,
+    DefectType, DefectRecord, FractureDiagnosis,
+    QualityIssue, QualityIssueBatch, ProcessRiskPoint,
+    QualityTrendRecord, TraceabilityLink,
+    ProcessRecipe, TrialPlan,
 )
 
 
@@ -2049,3 +2054,521 @@ class TrialAnalyzer:
         if pass_count == results.count() and not broken.exists():
             analysis['recommendations'].append('所有试样全部通过验证，表现稳定，可考虑扩大试制或批准配方')
         return analysis
+
+
+class QualityTraceabilityAnalyzer:
+    def __init__(self, batch=None):
+        self.batch = batch
+
+    def build_traceability_chain(self, batch):
+        chain = []
+
+        chain.append({
+            'type': 'material',
+            'type_label': '原料来源',
+            'title': f'{batch.get_material_type_display()} - {batch.batch_number}',
+            'description': batch.description or '',
+            'time': batch.production_date.strftime('%Y-%m-%d') if batch.production_date else '-',
+            'status_class': '',
+            'details': {
+                '供应商': batch.supplier or '-',
+                '材料类型': batch.get_material_type_display(),
+            },
+            'link': f'/materials/batches/{batch.pk}/',
+        })
+
+        params = batch.materialprocessparam_set.all()
+        if params.exists():
+            param_dict = {p.param_name: f'{p.param_value} {p.param_unit or ""}' for p in params[:5]}
+            chain.append({
+                'type': 'process',
+                'type_label': '工艺参数',
+                'title': f'{params.count()}项工艺参数',
+                'description': '加工过程参数记录',
+                'time': params.first().created_at.strftime('%Y-%m-%d') if params.first() and params.first().created_at else '-',
+                'status_class': '',
+                'details': param_dict,
+                'link': f'/materials/batches/{batch.pk}/',
+            })
+
+        recipes = ProcessRecipe.objects.filter(batch=batch) if hasattr(batch, 'recipe') else []
+        if recipes:
+            for recipe in recipes[:2]:
+                chain.append({
+                    'type': 'recipe',
+                    'type_label': '工艺配方',
+                    'title': recipe.recipe_name,
+                    'description': recipe.description or '',
+                    'time': recipe.created_at.strftime('%Y-%m-%d') if recipe.created_at else '-',
+                    'status_class': '',
+                    'details': {
+                        '配方编号': recipe.recipe_code,
+                        '类型': recipe.get_recipe_type_display(),
+                    },
+                    'link': f'/materials/recipes/{recipe.pk}/',
+                })
+
+        trials = TrialPlan.objects.filter(material_batch=batch)
+        if trials.exists():
+            for trial in trials[:3]:
+                chain.append({
+                    'type': 'trial',
+                    'type_label': '试制方案',
+                    'title': trial.plan_name,
+                    'description': trial.test_procedure or '',
+                    'time': trial.planned_start_date.strftime('%Y-%m-%d') if trial.planned_start_date else '-',
+                    'status_class': 'success' if trial.status == 'completed' else 'warning',
+                    'details': {
+                        '方案编号': trial.plan_code,
+                        '状态': trial.get_status_display(),
+                        '样品数': trial.sample_count,
+                    },
+                    'link': f'/materials/trials/{trial.pk}/',
+                })
+
+        tension_tests = batch.tensiontest_set.all().order_by('-test_time')
+        if tension_tests.exists():
+            avg_strength = sum(t.stress or 0 for t in tension_tests if t.stress) / tension_tests.count()
+            chain.append({
+                'type': 'tension_test',
+                'type_label': '拉伸测试',
+                'title': f'{tension_tests.count()}次拉伸测试',
+                'description': f'平均拉伸应力: {avg_strength:.1f} MPa',
+                'time': tension_tests.first().test_time.strftime('%Y-%m-%d') if tension_tests.first() and tension_tests.first().test_time else '-',
+                'status_class': '',
+                'details': {
+                    '测试次数': tension_tests.count(),
+                    '平均应力': f'{avg_strength:.1f} MPa',
+                },
+                'link': f'/materials/batches/{batch.pk}/',
+            })
+
+        fatigue_tests = batch.fatiguetest_set.all().order_by('-test_time')
+        if fatigue_tests.exists():
+            avg_cycles = sum(f.cycle_count or 0 for f in fatigue_tests) / fatigue_tests.count()
+            chain.append({
+                'type': 'fatigue_test',
+                'type_label': '疲劳测试',
+                'title': f'{fatigue_tests.count()}次疲劳测试',
+                'description': f'平均循环次数: {avg_cycles:.0f} 次',
+                'time': fatigue_tests.first().test_time.strftime('%Y-%m-%d') if fatigue_tests.first() and fatigue_tests.first().test_time else '-',
+                'status_class': '',
+                'details': {
+                    '测试次数': fatigue_tests.count(),
+                    '平均循环': f'{avg_cycles:.0f} 次',
+                },
+                'link': f'/materials/batches/{batch.pk}/',
+            })
+
+        defects = DefectRecord.objects.filter(batch=batch).order_by('-detected_at')
+        if defects.exists():
+            unresolved = defects.filter(status='open').count()
+            chain.append({
+                'type': 'defect',
+                'type_label': '缺陷记录',
+                'title': f'{defects.count()}条缺陷记录',
+                'description': f'{unresolved}条未解决',
+                'time': defects.first().detected_at.strftime('%Y-%m-%d') if defects.first() and defects.first().detected_at else '-',
+                'status_class': 'danger' if unresolved > 0 else 'success',
+                'details': {
+                    '总缺陷数': defects.count(),
+                    '未解决': unresolved,
+                },
+                'link': f'/materials/defect-records/?batch={batch.pk}',
+            })
+
+        diagnoses = FractureDiagnosis.objects.filter(batch=batch).order_by('-created_at')
+        if diagnoses.exists():
+            pending = diagnoses.filter(diagnosis_status='pending').count()
+            chain.append({
+                'type': 'fracture',
+                'type_label': '断裂诊断',
+                'title': f'{diagnoses.count()}次断裂诊断',
+                'description': f'{pending}个待诊断',
+                'time': diagnoses.first().created_at.strftime('%Y-%m-%d') if diagnoses.first() else '-',
+                'status_class': 'warning' if pending > 0 else 'success',
+                'details': {
+                    '诊断次数': diagnoses.count(),
+                    '待诊断': pending,
+                },
+                'link': f'/materials/fracture-diagnoses/?batch={batch.pk}',
+            })
+
+        chain.sort(key=lambda x: x['time'] if x['time'] != '-' else '0000-00-00')
+        return chain
+
+    def get_defect_statistics(self, days=30):
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days)
+
+        defects = DefectRecord.objects.filter(
+            detected_at__date__gte=start_date,
+            detected_at__date__lte=end_date
+        )
+
+        by_category = {}
+        for cat_val, cat_label in DefectType.CATEGORY_CHOICES:
+            category_defects = defects.filter(defect_type__category=cat_val)
+            by_category[cat_val] = {
+                'label': cat_label,
+                'count': category_defects.count(),
+            }
+
+        by_status = {}
+        for st_val, st_label in DefectRecord.STATUS_CHOICES:
+            by_status[st_val] = defects.filter(status=st_val).count()
+
+        trend_data = []
+        for i in range(days - 1, -1, -1):
+            day = end_date - timedelta(days=i)
+            day_defects = defects.filter(detected_at__date=day)
+            day_fractures = FractureDiagnosis.objects.filter(created_at__date=day)
+            quality_score = self._calculate_daily_quality_score(day)
+            trend_data.append({
+                'date': day.strftime('%Y-%m-%d'),
+                'defect_count': day_defects.count(),
+                'fracture_count': day_fractures.count(),
+                'quality_score': quality_score,
+            })
+
+        return {
+            'total': defects.count(),
+            'by_category': by_category,
+            'by_status': by_status,
+            'trend': trend_data,
+        }
+
+    def _calculate_daily_quality_score(self, day):
+        score = 100.0
+
+        defect_count = DefectRecord.objects.filter(detected_at__date=day).count()
+        fracture_count = FractureDiagnosis.objects.filter(created_at__date=day).count()
+
+        score -= defect_count * 5
+        score -= fracture_count * 10
+
+        return max(0.0, min(100.0, score))
+
+
+class FractureDiagnosisEngine:
+    FRACTURE_MODE_KEYWORDS = {
+        'tensile': ['拉伸', '抗拉', '拉力', 'tensile'],
+        'fatigue': ['疲劳', '循环', '反复', 'fatigue'],
+        'shear': ['剪切', '剪断', 'shear'],
+        'bending': ['弯曲', '弯折', 'bending'],
+        'torsion': ['扭转', '扭力', 'torsion'],
+        'impact': ['冲击', '撞击', 'impact'],
+        'wear': ['磨损', '磨耗', 'wear'],
+        'corrosion': ['腐蚀', '锈蚀', 'corrosion'],
+        'composite': ['复合', '综合', 'composite'],
+    }
+
+    CAUSE_CATEGORY_RULES = {
+        'material': ['材料', '材质', '成分', '缺陷', '杂质', '晶界', 'fiber', 'resin'],
+        'process': ['工艺', '加工', '温度', '压力', '固化', '成型', '工艺参数'],
+        'environment': ['环境', '温度', '湿度', '腐蚀', '老化', '环境因素'],
+        'test': ['测试', '试验', '加载', '试验机', 'test'],
+        'design': ['设计', '结构', 'geometry', '尺寸'],
+        'other': ['其他', 'unknown', '不明'],
+    }
+
+    def __init__(self, fracture_diagnosis=None):
+        self.diagnosis = fracture_diagnosis
+
+    def analyze_fracture_mode(self, description):
+        if not description:
+            return None, 0.0
+
+        description = description.lower()
+        mode_scores = {}
+
+        for mode, keywords in self.FRACTURE_MODE_KEYWORDS.items():
+            score = 0
+            for keyword in keywords:
+                if keyword.lower() in description:
+                    score += 1
+            if score > 0:
+                mode_scores[mode] = score
+
+        if not mode_scores:
+            return None, 0.0
+
+        total_score = sum(mode_scores.values())
+        primary_mode = max(mode_scores, key=mode_scores.get)
+        confidence = mode_scores[primary_mode] / total_score
+
+        return primary_mode, confidence
+
+    def analyze_primary_cause(self, description):
+        if not description:
+            return None, 0.0
+
+        description = description.lower()
+        cause_scores = {}
+
+        for category, keywords in self.CAUSE_CATEGORY_RULES.items():
+            score = 0
+            for keyword in keywords:
+                if keyword.lower() in description:
+                    score += 1
+            if score > 0:
+                cause_scores[category] = score
+
+        if not cause_scores:
+            return None, 0.0
+
+        total_score = sum(cause_scores.values())
+        primary_cause = max(cause_scores, key=cause_scores.get)
+        confidence = cause_scores[primary_cause] / total_score
+
+        return primary_cause, confidence
+
+    def generate_suggestions(self, fracture_mode, primary_cause):
+        suggestions = []
+
+        if fracture_mode == 'fatigue':
+            suggestions.append('优化表面处理工艺，提高表面光洁度')
+            suggestions.append('考虑增加喷丸或滚压强化处理')
+            suggestions.append('检查应力集中部位，优化过渡圆角设计')
+        elif fracture_mode == 'tensile':
+            suggestions.append('提高纤维取向一致性')
+            suggestions.append('优化树脂基体配方，增强界面结合力')
+            suggestions.append('检查原材料批次质量稳定性')
+        elif fracture_mode == 'shear':
+            suggestions.append('优化剪切方向的纤维铺层设计')
+            suggestions.append('提高层间结合强度')
+            suggestions.append('考虑使用韧性更好的树脂体系')
+
+        if primary_cause == 'material':
+            suggestions.append('加强原材料入厂检验')
+            suggestions.append('建立材料性能数据库和追溯体系')
+            suggestions.append('考虑更换材料供应商或牌号')
+        elif primary_cause == 'process':
+            suggestions.append('优化固化工艺参数（温度、压力、时间）')
+            suggestions.append('加强生产过程质量控制')
+            suggestions.append('建立工艺参数标准作业程序（SOP）')
+        elif primary_cause == 'design':
+            suggestions.append('复核结构设计的安全系数')
+            suggestions.append('进行有限元应力分析优化')
+            suggestions.append('考虑增加冗余设计或加强结构')
+
+        if not suggestions:
+            suggestions.append('建议进行详细的失效分析，确定根本原因')
+            suggestions.append('建立断裂案例库，积累经验数据')
+
+        return suggestions
+
+    def auto_diagnose(self):
+        if not self.diagnosis:
+            return {}
+
+        description = ' '.join(filter(None, [
+            self.diagnosis.fracture_surface_morphology or '',
+            self.diagnosis.fracture_features or '',
+        ]))
+
+        fracture_mode, mode_confidence = self.analyze_fracture_mode(description)
+        primary_cause, cause_confidence = self.analyze_primary_cause(description)
+        suggestions = self.generate_suggestions(fracture_mode, primary_cause)
+
+        return {
+            'fracture_mode': fracture_mode,
+            'fracture_mode_confidence': mode_confidence,
+            'primary_cause_category': primary_cause,
+            'primary_cause_confidence': cause_confidence,
+            'suggestions': suggestions,
+        }
+
+
+class QualityRiskAnalyzer:
+    RISK_SCORE_THRESHOLDS = {
+        'low': 30,
+        'medium': 70,
+        'high': 100,
+    }
+
+    def __init__(self):
+        pass
+
+    def calculate_risk_score(self, occurrence, severity, detectability):
+        if occurrence is None or severity is None or detectability is None:
+            return None
+        return occurrence * severity * detectability
+
+    def determine_risk_level(self, risk_score):
+        if risk_score is None:
+            return None
+        if risk_score < self.RISK_SCORE_THRESHOLDS['low']:
+            return 'low'
+        elif risk_score < self.RISK_SCORE_THRESHOLDS['medium']:
+            return 'medium'
+        else:
+            return 'high'
+
+    def get_risk_summary(self, recipe=None):
+        risks = ProcessRiskPoint.objects.filter(is_active=True)
+        if recipe:
+            risks = risks.filter(recipe=recipe)
+
+        total_risks = risks.count()
+        if total_risks == 0:
+            return {
+                'total': 0,
+                'high': 0,
+                'medium': 0,
+                'low': 0,
+                'avg_score': 0,
+                'top_risks': [],
+            }
+
+        high_risks = risks.filter(risk_level='high').count()
+        medium_risks = risks.filter(risk_level='medium').count()
+        low_risks = risks.filter(risk_level='low').count()
+
+        scores = risks.filter(risk_score__isnull=False).values_list('risk_score', flat=True)
+        avg_score = sum(scores) / len(scores) if scores else 0
+
+        top_risks = risks.filter(risk_level='high').order_by('-risk_score')[:5]
+
+        by_category = {}
+        for cat_val, cat_label in ProcessRiskPoint.CATEGORY_CHOICES:
+            cat_risks = risks.filter(category=cat_val)
+            cat_scores = list(cat_risks.filter(risk_score__isnull=False).values_list('risk_score', flat=True))
+            by_category[cat_val] = {
+                'label': cat_label,
+                'count': cat_risks.count(),
+                'avg_score': round(sum(cat_scores) / len(cat_scores), 1) if cat_scores else 0,
+            }
+
+        return {
+            'total': total_risks,
+            'high': high_risks,
+            'medium': medium_risks,
+            'low': low_risks,
+            'avg_score': round(avg_score, 1),
+            'top_risks': list(top_risks.values('risk_code', 'risk_name', 'risk_score')),
+            'by_category': by_category,
+        }
+
+    def identify_high_risk_processes(self, threshold=70):
+        high_risks = ProcessRiskPoint.objects.filter(
+            is_active=True,
+            risk_score__gte=threshold
+        ).order_by('-risk_score')
+
+        result = []
+        for risk in high_risks:
+            result.append({
+                'risk_code': risk.risk_code,
+                'risk_name': risk.risk_name,
+                'category': risk.get_category_display(),
+                'risk_score': risk.risk_score,
+                'risk_level': risk.get_risk_level_display(),
+                'recipe': risk.recipe.recipe_name if risk.recipe else None,
+                'control_measures': risk.control_measures,
+            })
+
+        return result
+
+
+class QualityTrendAnalyzer:
+    def __init__(self):
+        pass
+
+    def analyze_trend(self, days=30, trend_type='daily'):
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days)
+
+        trend_data = []
+        dates = []
+        defect_counts = []
+        fracture_counts = []
+        quality_scores = []
+        tensile_strengths = []
+        fatigue_lives = []
+
+        for i in range(days - 1, -1, -1):
+            day = end_date - timedelta(days=i)
+            dates.append(day.strftime('%Y-%m-%d'))
+
+            day_defects = DefectRecord.objects.filter(detected_at__date=day).count()
+            defect_counts.append(day_defects)
+
+            day_fractures = FractureDiagnosis.objects.filter(created_at__date=day).count()
+            fracture_counts.append(day_fractures)
+
+            quality_score = self._calculate_daily_quality_score(day)
+            quality_scores.append(quality_score)
+
+            day_tensile = TensionTest.objects.filter(test_time__date=day, stress__isnull=False)
+            avg_tensile = day_tensile.aggregate(avg=Sum('stress'))['avg'] / day_tensile.count() if day_tensile.exists() else 0
+            tensile_strengths.append(float(avg_tensile) if avg_tensile else 0)
+
+            day_fatigue = FatigueTest.objects.filter(test_time__date=day, cycle_count__isnull=False)
+            avg_fatigue = day_fatigue.aggregate(avg=Sum('cycle_count'))['avg'] / day_fatigue.count() if day_fatigue.exists() else 0
+            fatigue_lives.append(float(avg_fatigue) if avg_fatigue else 0)
+
+            trend_data.append({
+                'date': day.strftime('%Y-%m-%d'),
+                'defect_count': day_defects,
+                'fracture_count': day_fractures,
+                'quality_score': quality_score,
+                'avg_tensile_strength': float(avg_tensile) if avg_tensile else None,
+                'avg_fatigue_life': float(avg_fatigue) if avg_fatigue else None,
+            })
+
+        stats = self._calculate_trend_stats(trend_data)
+
+        return {
+            'dates': dates,
+            'defect_counts': defect_counts,
+            'fracture_counts': fracture_counts,
+            'quality_scores': quality_scores,
+            'tensile_strengths': tensile_strengths,
+            'fatigue_lives': fatigue_lives,
+            'stats': stats,
+            'trend_data': trend_data,
+        }
+
+    def _calculate_daily_quality_score(self, day):
+        score = 100.0
+
+        defects = DefectRecord.objects.filter(detected_at__date=day)
+        for defect in defects:
+            if defect.severity_assessment == 'critical':
+                score -= 15
+            elif defect.severity_assessment == 'major':
+                score -= 10
+            elif defect.severity_assessment == 'minor':
+                score -= 5
+            else:
+                score -= 3
+
+        fractures = FractureDiagnosis.objects.filter(created_at__date=day)
+        score -= fractures.count() * 8
+
+        return max(0.0, min(100.0, score))
+
+    def _calculate_trend_stats(self, trend_data):
+        if not trend_data:
+            return {}
+
+        total_defects = sum(d['defect_count'] for d in trend_data)
+        total_fractures = sum(d['fracture_count'] for d in trend_data)
+
+        quality_scores = [d['quality_score'] for d in trend_data]
+        avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+
+        tensile_values = [d['avg_tensile_strength'] for d in trend_data if d['avg_tensile_strength']]
+        avg_tensile = sum(tensile_values) / len(tensile_values) if tensile_values else 0
+
+        fatigue_values = [d['avg_fatigue_life'] for d in trend_data if d['avg_fatigue_life']]
+        avg_fatigue = sum(fatigue_values) / len(fatigue_values) if fatigue_values else 0
+
+        return {
+            'total_defects': total_defects,
+            'total_fractures': total_fractures,
+            'avg_quality_score': round(avg_quality, 1),
+            'avg_tensile_strength': round(avg_tensile, 1),
+            'avg_fatigue_life': round(avg_fatigue, 0),
+        }

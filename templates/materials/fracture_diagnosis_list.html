@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+
+{% block title %}断裂诊断 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔬 断裂诊断</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:quality_traceability_dashboard' %}" class="btn btn-secondary">返回仪表盘</a>
+    </div>
+</div>
+
+<div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+    <div class="stat-card">
+        <div class="stat-label">总诊断数</div>
+        <div class="stat-value">{{ diagnosis_summary.total }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">待诊断</div>
+        <div class="stat-value">{{ diagnosis_summary.pending }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">诊断中</div>
+        <div class="stat-value">{{ diagnosis_summary.in_progress }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">已完成</div>
+        <div class="stat-value">{{ diagnosis_summary.completed }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">断裂诊断列表</div>
+    <div class="filter-bar">
+        <form method="get" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <div>
+                <label>状态：</label>
+                <select name="status" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for st_val, st_label in status_choices %}
+                    <option value="{{ st_val }}" {% if request.GET.status == st_val|stringformat:"s" %}selected{% endif %}>{{ st_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>断裂模式：</label>
+                <select name="mode" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for mode_val, mode_label in mode_choices %}
+                    <option value="{{ mode_val }}" {% if request.GET.mode == mode_val|stringformat:"s" %}selected{% endif %}>{{ mode_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <a href="{% url 'materials:fracture_diagnosis_list' %}" class="btn btn-sm btn-secondary">重置</a>
+        </form>
+    </div>
+
+    {% if diagnoses %}
+    <table>
+        <thead>
+            <tr>
+                <th>诊断编号</th>
+                <th>批次</th>
+                <th>断裂模式</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for diagnosis in diagnoses %}
+            <tr>
+                <td><a href="{% url 'materials:fracture_diagnosis_detail' diagnosis.pk %}"><strong>{{ diagnosis.diagnosis_code }}</strong></a></td>
+                <td>{{ diagnosis.batch.batch_number }}</td>
+                <td>{{ diagnosis.get_fracture_mode_display }}</td>
+                <td><span class="badge {{ diagnosis.status_color_class }}">{{ diagnosis.get_diagnosis_status_display }}</span></td>
+                <td>{{ diagnosis.created_at|date:"Y-m-d" }}</td>
+                <td>
+                    <a href="{% url 'materials:fracture_diagnosis_detail' diagnosis.pk %}" class="btn btn-sm btn-primary">详情</a>
+                    {% if diagnosis.diagnosis_status == 'pending' %}
+                    <a href="{% url 'materials:fracture_diagnosis_edit' diagnosis.pk %}" class="btn btn-sm btn-success">开始诊断</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if is_paginated %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?page=1{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}{% if request.GET.mode %}&mode={{ request.GET.mode }}{% endif %}">首页</a>
+        <a href="?page={{ page_obj.previous_page_number }}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}{% if request.GET.mode %}&mode={{ request.GET.mode }}{% endif %}">上一页</a>
+        {% endif %}
+        <span>第 {{ page_obj.number }} / {{ paginator.num_pages }} 页</span>
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}{% if request.GET.mode %}&mode={{ request.GET.mode }}{% endif %}">下一页</a>
+        <a href="?page={{ paginator.num_pages }}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}{% if request.GET.mode %}&mode={{ request.GET.mode }}{% endif %}">末页</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>暂无断裂诊断记录</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

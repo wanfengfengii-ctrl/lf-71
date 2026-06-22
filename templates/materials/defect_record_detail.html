@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+
+{% block title %}缺陷详情 - {{ object.defect_code }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔍 缺陷详情 - {{ object.defect_code }}</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:defect_record_list' %}" class="btn btn-secondary">返回列表</a>
+        <a href="{% url 'materials:defect_record_edit' object.pk %}" class="btn btn-primary">编辑</a>
+        {% if object.status == 'open' %}
+        <a href="{% url 'materials:defect_record_resolve' object.pk %}" class="btn btn-success">处理缺陷</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">基本信息</div>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">缺陷编号</span>
+                <span class="info-value"><strong>{{ object.defect_code }}</strong></span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">状态</span>
+                <span class="badge {{ object.status_color_class }}">{{ object.get_status_display }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">关联批次</span>
+                <span class="info-value"><a href="{% url 'materials:batch_detail' object.batch.pk %}">{{ object.batch.batch_number }}</a></span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">缺陷类型</span>
+                <span class="info-value">{{ object.defect_type.defect_name|default:"未分类" }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">发现来源</span>
+                <span class="info-value">{{ object.get_detection_source_display }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">严重程度</span>
+                <span class="badge {{ object.severity_color_class }}">{{ object.get_severity_assessment_display }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">发现时间</span>
+                <span class="info-value">{{ object.detected_at|date:"Y-m-d H:i" }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">发现人</span>
+                <span class="info-value">{{ object.detected_by|default:"-" }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">位置与尺寸</div>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">缺陷位置</span>
+                <span class="info-value">{{ object.defect_location|default:"-" }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">缺陷尺寸</span>
+                <span class="info-value">{{ object.defect_size|default:"-" }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">缺陷数量</span>
+                <span class="info-value">{{ object.defect_count|default:"1" }} 个</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">受影响样本数</span>
+                <span class="info-value">{{ object.affected_samples|default:"-" }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">缺陷描述</div>
+    <p>{{ object.defect_description|default:"暂无描述" }}</p>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">根本原因分析</div>
+        <p>{{ object.root_cause|default:"暂无分析" }}</p>
+    </div>
+    <div class="card">
+        <div class="card-title">纠正措施</div>
+        <p>{{ object.corrective_action|default:"暂无措施" }}</p>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">预防措施</div>
+        <p>{{ object.preventive_action|default:"暂无措施" }}</p>
+    </div>
+    <div class="card">
+        <div class="card-title">验证结果</div>
+        <p>{{ object.verification_result|default:"暂无结果" }}</p>
+        {% if object.verified_at %}
+        <p><small>验证时间：{{ object.verified_at|date:"Y-m-d H:i" }}</small></p>
+        {% endif %}
+    </div>
+</div>
+
+{% if object.closed_at %}
+<div class="card green">
+    <div class="card-title">关闭信息</div>
+    <div class="info-grid">
+        <div class="info-item">
+            <span class="info-label">关闭时间</span>
+            <span class="info-value">{{ object.closed_at|date:"Y-m-d H:i" }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">关闭人</span>
+            <span class="info-value">{{ object.closed_by|default:"-" }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">关闭结论</span>
+            <span class="info-value">{{ object.close_note|default:"-" }}</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

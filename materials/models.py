@@ -2489,3 +2489,1040 @@ class OptimizationSuggestion(models.Model):
         if notes:
             self.reviewer_notes = notes
         self.save()
+
+
+class DefectType(models.Model):
+    CATEGORY_MATERIAL = 'material'
+    CATEGORY_PROCESS = 'process'
+    CATEGORY_STRUCTURE = 'structure'
+    CATEGORY_SURFACE = 'surface'
+    CATEGORY_OTHER = 'other'
+
+    CATEGORY_CHOICES = [
+        (CATEGORY_MATERIAL, '材料缺陷'),
+        (CATEGORY_PROCESS, '工艺缺陷'),
+        (CATEGORY_STRUCTURE, '结构缺陷'),
+        (CATEGORY_SURFACE, '表面缺陷'),
+        (CATEGORY_OTHER, '其他缺陷'),
+    ]
+
+    SEVERITY_LOW = 'low'
+    SEVERITY_MEDIUM = 'medium'
+    SEVERITY_HIGH = 'high'
+    SEVERITY_CRITICAL = 'critical'
+
+    SEVERITY_CHOICES = [
+        (SEVERITY_LOW, '轻微'),
+        (SEVERITY_MEDIUM, '中等'),
+        (SEVERITY_HIGH, '严重'),
+        (SEVERITY_CRITICAL, '致命'),
+    ]
+
+    defect_code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name='缺陷编码'
+    )
+    defect_name = models.CharField(
+        max_length=200,
+        verbose_name='缺陷名称'
+    )
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default=CATEGORY_OTHER,
+        verbose_name='缺陷类别'
+    )
+    severity = models.CharField(
+        max_length=20,
+        choices=SEVERITY_CHOICES,
+        default=SEVERITY_MEDIUM,
+        verbose_name='严重程度'
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name='缺陷描述'
+    )
+    typical_causes = models.TextField(
+        blank=True,
+        verbose_name='典型原因'
+    )
+    detection_method = models.TextField(
+        blank=True,
+        verbose_name='检测方法'
+    )
+    prevention_measures = models.TextField(
+        blank=True,
+        verbose_name='预防措施'
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name='是否启用'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='更新时间'
+    )
+
+    class Meta:
+        verbose_name = '缺陷类型'
+        verbose_name_plural = '缺陷类型'
+        ordering = ['category', 'severity', 'defect_code']
+
+    def __str__(self):
+        return f'{self.defect_code} - {self.defect_name}'
+
+    @property
+    def severity_color_class(self):
+        mapping = {
+            self.SEVERITY_LOW: 'badge-info',
+            self.SEVERITY_MEDIUM: 'badge-warning',
+            self.SEVERITY_HIGH: 'badge-danger',
+            self.SEVERITY_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.severity, 'badge-gray')
+
+    @property
+    def record_count(self):
+        return self.defect_records.count()
+
+
+class DefectRecord(models.Model):
+    SOURCE_TENSION_TEST = 'tension'
+    SOURCE_FATIGUE_TEST = 'fatigue'
+    SOURCE_TRIAL = 'trial'
+    SOURCE_INSPECTION = 'inspection'
+    SOURCE_OTHER = 'other'
+
+    SOURCE_CHOICES = [
+        (SOURCE_TENSION_TEST, '拉伸测试'),
+        (SOURCE_FATIGUE_TEST, '疲劳测试'),
+        (SOURCE_TRIAL, '试制发现'),
+        (SOURCE_INSPECTION, '质检发现'),
+        (SOURCE_OTHER, '其他来源'),
+    ]
+
+    STATUS_DETECTED = 'detected'
+    STATUS_ANALYZING = 'analyzing'
+    STATUS_RESOLVED = 'resolved'
+    STATUS_CLOSED = 'closed'
+
+    STATUS_CHOICES = [
+        (STATUS_DETECTED, '已发现'),
+        (STATUS_ANALYZING, '分析中'),
+        (STATUS_RESOLVED, '已解决'),
+        (STATUS_CLOSED, '已关闭'),
+    ]
+
+    batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='defect_records',
+        verbose_name='材料批次'
+    )
+    defect_type = models.ForeignKey(
+        DefectType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='defect_records',
+        verbose_name='缺陷类型'
+    )
+    defect_code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name='缺陷记录编号'
+    )
+    source_type = models.CharField(
+        max_length=30,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_INSPECTION,
+        verbose_name='发现来源'
+    )
+    source_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name='来源记录ID'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DETECTED,
+        verbose_name='处理状态'
+    )
+    defect_location = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='缺陷位置'
+    )
+    defect_size = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='缺陷尺寸'
+    )
+    description = models.TextField(
+        verbose_name='缺陷描述'
+    )
+    severity_assessment = models.CharField(
+        max_length=20,
+        choices=DefectType.SEVERITY_CHOICES,
+        default=DefectType.SEVERITY_MEDIUM,
+        verbose_name='严重程度评估'
+    )
+    root_cause = models.TextField(
+        blank=True,
+        verbose_name='根本原因分析'
+    )
+    corrective_action = models.TextField(
+        blank=True,
+        verbose_name='纠正措施'
+    )
+    preventive_action = models.TextField(
+        blank=True,
+        verbose_name='预防措施'
+    )
+    detected_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='发现人'
+    )
+    detected_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='发现时间'
+    )
+    resolved_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='处理人'
+    )
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='解决时间'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='备注'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='更新时间'
+    )
+
+    class Meta:
+        verbose_name = '缺陷记录'
+        verbose_name_plural = '缺陷记录'
+        ordering = ['-detected_at']
+
+    def __str__(self):
+        return f'{self.defect_code} - {self.batch.batch_number}'
+
+    @property
+    def status_color_class(self):
+        mapping = {
+            self.STATUS_DETECTED: 'badge-danger',
+            self.STATUS_ANALYZING: 'badge-warning',
+            self.STATUS_RESOLVED: 'badge-info',
+            self.STATUS_CLOSED: 'badge-success',
+        }
+        return mapping.get(self.status, 'badge-gray')
+
+    @property
+    def severity_color_class(self):
+        mapping = {
+            DefectType.SEVERITY_LOW: 'badge-info',
+            DefectType.SEVERITY_MEDIUM: 'badge-warning',
+            DefectType.SEVERITY_HIGH: 'badge-danger',
+            DefectType.SEVERITY_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.severity_assessment, 'badge-gray')
+
+    def resolve(self, resolver='', corrective='', preventive='', notes=''):
+        self.status = self.STATUS_RESOLVED
+        self.resolved_by = resolver
+        self.resolved_at = timezone.now()
+        if corrective:
+            self.corrective_action = corrective
+        if preventive:
+            self.preventive_action = preventive
+        if notes:
+            self.notes = notes
+        self.save()
+
+    def close(self):
+        self.status = self.STATUS_CLOSED
+        self.save()
+
+
+class FractureDiagnosis(models.Model):
+    DIAGNOSIS_STATUS_PENDING = 'pending'
+    DIAGNOSIS_STATUS_IN_PROGRESS = 'in_progress'
+    DIAGNOSIS_STATUS_COMPLETED = 'completed'
+
+    DIAGNOSIS_STATUS_CHOICES = [
+        (DIAGNOSIS_STATUS_PENDING, '待诊断'),
+        (DIAGNOSIS_STATUS_IN_PROGRESS, '诊断中'),
+        (DIAGNOSIS_STATUS_COMPLETED, '已完成'),
+    ]
+
+    FRACTURE_MODE_DUCTILE = 'ductile'
+    FRACTURE_MODE_BRITTLE = 'brittle'
+    FRACTURE_MODE_FATIGUE = 'fatigue'
+    FRACTURE_MODE_CREEP = 'creep'
+    FRACTURE_MODE_OTHER = 'other'
+
+    FRACTURE_MODE_CHOICES = [
+        (FRACTURE_MODE_DUCTILE, '韧性断裂'),
+        (FRACTURE_MODE_BRITTLE, '脆性断裂'),
+        (FRACTURE_MODE_FATIGUE, '疲劳断裂'),
+        (FRACTURE_MODE_CREEP, '蠕变断裂'),
+        (FRACTURE_MODE_OTHER, '其他'),
+    ]
+
+    batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='fracture_diagnoses',
+        verbose_name='材料批次'
+    )
+    diagnosis_code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name='诊断编号'
+    )
+    source_test_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('tension', '拉伸测试'),
+            ('fatigue', '疲劳测试'),
+            ('trial', '试制测试'),
+        ],
+        default='tension',
+        verbose_name='断裂测试类型'
+    )
+    source_test_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name='测试记录ID'
+    )
+    diagnosis_status = models.CharField(
+        max_length=20,
+        choices=DIAGNOSIS_STATUS_CHOICES,
+        default=DIAGNOSIS_STATUS_PENDING,
+        verbose_name='诊断状态'
+    )
+    fracture_mode = models.CharField(
+        max_length=30,
+        choices=FRACTURE_MODE_CHOICES,
+        default=FRACTURE_MODE_OTHER,
+        verbose_name='断裂模式'
+    )
+    fracture_location = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='断裂位置'
+    )
+    fracture_surface = models.TextField(
+        blank=True,
+        verbose_name='断口形貌描述'
+    )
+    primary_cause = models.TextField(
+        blank=True,
+        verbose_name='主要原因'
+    )
+    secondary_causes = models.JSONField(
+        default=list,
+        verbose_name='次要原因列表'
+    )
+    root_cause_category = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name='根本原因类别'
+    )
+    material_factors = models.JSONField(
+        default=list,
+        verbose_name='材料因素'
+    )
+    process_factors = models.JSONField(
+        default=list,
+        verbose_name='工艺因素'
+    )
+    environmental_factors = models.JSONField(
+        default=list,
+        verbose_name='环境因素'
+    )
+    test_factors = models.JSONField(
+        default=list,
+        verbose_name='测试因素'
+    )
+    fracture_energy = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='断裂能(J)'
+    )
+    crack_propagation_rate = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='裂纹扩展速率'
+    )
+    fatigue_crack_initiation_cycles = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='疲劳裂纹萌生循环数'
+    )
+    diagnosis_conclusion = models.TextField(
+        blank=True,
+        verbose_name='诊断结论'
+    )
+    improvement_suggestions = models.TextField(
+        blank=True,
+        verbose_name='改进建议'
+    )
+    diagnosed_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='诊断人'
+    )
+    diagnosed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='诊断完成时间'
+    )
+    reviewed_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='审核人'
+    )
+    is_verified = models.BooleanField(
+        default=False,
+        verbose_name='是否验证'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='备注'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='更新时间'
+    )
+
+    class Meta:
+        verbose_name = '断裂诊断记录'
+        verbose_name_plural = '断裂诊断记录'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.diagnosis_code} - {self.batch.batch_number}'
+
+    @property
+    def status_color_class(self):
+        mapping = {
+            self.DIAGNOSIS_STATUS_PENDING: 'badge-secondary',
+            self.DIAGNOSIS_STATUS_IN_PROGRESS: 'badge-warning',
+            self.DIAGNOSIS_STATUS_COMPLETED: 'badge-success',
+        }
+        return mapping.get(self.diagnosis_status, 'badge-gray')
+
+    def start_diagnosis(self, diagnosed_by=''):
+        self.diagnosis_status = self.DIAGNOSIS_STATUS_IN_PROGRESS
+        if diagnosed_by:
+            self.diagnosed_by = diagnosed_by
+        self.save()
+
+    def complete_diagnosis(self, **kwargs):
+        self.diagnosis_status = self.DIAGNOSIS_STATUS_COMPLETED
+        self.diagnosed_at = timezone.now()
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+        self.save()
+
+
+class QualityIssue(models.Model):
+    ISSUE_TYPE_DEFECT = 'defect'
+    ISSUE_TYPE_PERFORMANCE = 'performance'
+    ISSUE_TYPE_PROCESS = 'process'
+    ISSUE_TYPE_MATERIAL = 'material'
+    ISSUE_TYPE_OTHER = 'other'
+
+    ISSUE_TYPE_CHOICES = [
+        (ISSUE_TYPE_DEFECT, '缺陷问题'),
+        (ISSUE_TYPE_PERFORMANCE, '性能问题'),
+        (ISSUE_TYPE_PROCESS, '工艺问题'),
+        (ISSUE_TYPE_MATERIAL, '材料问题'),
+        (ISSUE_TYPE_OTHER, '其他问题'),
+    ]
+
+    PRIORITY_LOW = 'low'
+    PRIORITY_MEDIUM = 'medium'
+    PRIORITY_HIGH = 'high'
+    PRIORITY_CRITICAL = 'critical'
+
+    PRIORITY_CHOICES = [
+        (PRIORITY_LOW, '低'),
+        (PRIORITY_MEDIUM, '中'),
+        (PRIORITY_HIGH, '高'),
+        (PRIORITY_CRITICAL, '紧急'),
+    ]
+
+    STATUS_OPEN = 'open'
+    STATUS_INVESTIGATING = 'investigating'
+    STATUS_RESOLVED = 'resolved'
+    STATUS_CLOSED = 'closed'
+
+    STATUS_CHOICES = [
+        (STATUS_OPEN, '已立项'),
+        (STATUS_INVESTIGATING, '调查中'),
+        (STATUS_RESOLVED, '已解决'),
+        (STATUS_CLOSED, '已关闭'),
+    ]
+
+    issue_code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name='问题编号'
+    )
+    issue_title = models.CharField(
+        max_length=200,
+        verbose_name='问题标题'
+    )
+    issue_type = models.CharField(
+        max_length=30,
+        choices=ISSUE_TYPE_CHOICES,
+        default=ISSUE_TYPE_OTHER,
+        verbose_name='问题类型'
+    )
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default=PRIORITY_MEDIUM,
+        verbose_name='优先级'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_OPEN,
+        verbose_name='处理状态'
+    )
+    description = models.TextField(
+        verbose_name='问题描述'
+    )
+    impact_analysis = models.TextField(
+        blank=True,
+        verbose_name='影响分析'
+    )
+    root_cause = models.TextField(
+        blank=True,
+        verbose_name='根本原因'
+    )
+    corrective_action = models.TextField(
+        blank=True,
+        verbose_name='纠正措施'
+    )
+    preventive_action = models.TextField(
+        blank=True,
+        verbose_name='预防措施'
+    )
+    related_defect_types = models.ManyToManyField(
+        DefectType,
+        blank=True,
+        related_name='quality_issues',
+        verbose_name='关联缺陷类型'
+    )
+    related_recipes = models.ManyToManyField(
+        ProcessRecipe,
+        blank=True,
+        related_name='quality_issues',
+        verbose_name='关联工艺配方'
+    )
+    raised_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='提出人'
+    )
+    raised_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='提出时间'
+    )
+    assigned_to = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='负责人'
+    )
+    resolved_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='解决人'
+    )
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='解决时间'
+    )
+    closed_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='关闭人'
+    )
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='关闭时间'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='备注'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='更新时间'
+    )
+
+    class Meta:
+        verbose_name = '质量问题'
+        verbose_name_plural = '质量问题'
+        ordering = ['-priority', '-created_at']
+
+    def __str__(self):
+        return f'{self.issue_code} - {self.issue_title}'
+
+    @property
+    def status_color_class(self):
+        mapping = {
+            self.STATUS_OPEN: 'badge-danger',
+            self.STATUS_INVESTIGATING: 'badge-warning',
+            self.STATUS_RESOLVED: 'badge-info',
+            self.STATUS_CLOSED: 'badge-success',
+        }
+        return mapping.get(self.status, 'badge-gray')
+
+    @property
+    def priority_color_class(self):
+        mapping = {
+            self.PRIORITY_LOW: 'badge-info',
+            self.PRIORITY_MEDIUM: 'badge-warning',
+            self.PRIORITY_HIGH: 'badge-danger',
+            self.PRIORITY_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.priority, 'badge-gray')
+
+    @property
+    def affected_batch_count(self):
+        return self.affected_batches.count()
+
+    def add_affected_batch(self, batch, notes=''):
+        return QualityIssueBatch.objects.create(
+            quality_issue=self,
+            batch=batch,
+            notes=notes
+        )
+
+
+class QualityIssueBatch(models.Model):
+    quality_issue = models.ForeignKey(
+        QualityIssue,
+        on_delete=models.CASCADE,
+        related_name='affected_batches',
+        verbose_name='质量问题'
+    )
+    batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='quality_issues',
+        verbose_name='材料批次'
+    )
+    impact_level = models.CharField(
+        max_length=20,
+        choices=[
+            ('direct', '直接影响'),
+            ('indirect', '间接影响'),
+            ('potential', '潜在影响'),
+        ],
+        default='potential',
+        verbose_name='影响程度'
+    )
+    is_confirmed = models.BooleanField(
+        default=False,
+        verbose_name='是否确认'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='备注'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='关联时间'
+    )
+
+    class Meta:
+        verbose_name = '质量问题批次关联'
+        verbose_name_plural = '质量问题批次关联'
+        ordering = ['-created_at']
+        unique_together = [['quality_issue', 'batch']]
+
+    def __str__(self):
+        return f'{self.quality_issue.issue_code} - {self.batch.batch_number}'
+
+
+class ProcessRiskPoint(models.Model):
+    RISK_LEVEL_LOW = 'low'
+    RISK_LEVEL_MEDIUM = 'medium'
+    RISK_LEVEL_HIGH = 'high'
+    RISK_LEVEL_CRITICAL = 'critical'
+
+    RISK_LEVEL_CHOICES = [
+        (RISK_LEVEL_LOW, '低风险'),
+        (RISK_LEVEL_MEDIUM, '中风险'),
+        (RISK_LEVEL_HIGH, '高风险'),
+        (RISK_LEVEL_CRITICAL, '极高风险'),
+    ]
+
+    CATEGORY_MATERIAL = 'material'
+    CATEGORY_PROCESS = 'process'
+    CATEGORY_EQUIPMENT = 'equipment'
+    CATEGORY_ENVIRONMENT = 'environment'
+    CATEGORY_OPERATION = 'operation'
+
+    CATEGORY_CHOICES = [
+        (CATEGORY_MATERIAL, '原材料'),
+        (CATEGORY_PROCESS, '工艺参数'),
+        (CATEGORY_EQUIPMENT, '设备状态'),
+        (CATEGORY_ENVIRONMENT, '环境条件'),
+        (CATEGORY_OPERATION, '操作规范'),
+    ]
+
+    recipe = models.ForeignKey(
+        ProcessRecipe,
+        on_delete=models.CASCADE,
+        related_name='risk_points',
+        verbose_name='所属配方'
+    )
+    risk_code = models.CharField(
+        max_length=50,
+        verbose_name='风险点编号'
+    )
+    risk_name = models.CharField(
+        max_length=200,
+        verbose_name='风险点名称'
+    )
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default=CATEGORY_PROCESS,
+        verbose_name='风险类别'
+    )
+    risk_level = models.CharField(
+        max_length=20,
+        choices=RISK_LEVEL_CHOICES,
+        default=RISK_LEVEL_MEDIUM,
+        verbose_name='风险等级'
+    )
+    risk_score = models.FloatField(
+        default=50,
+        verbose_name='风险评分(0-100)',
+        help_text='综合风险评分，越高风险越大'
+    )
+    process_step = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='工艺环节'
+    )
+    related_param = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='关联参数'
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name='风险描述'
+    )
+    potential_consequences = models.TextField(
+        blank=True,
+        verbose_name='潜在后果'
+    )
+    likelihood = models.FloatField(
+        default=5,
+        verbose_name='发生可能性(1-10)',
+        help_text='风险发生的可能性，1最低，10最高'
+    )
+    severity = models.FloatField(
+        default=5,
+        verbose_name='影响严重度(1-10)',
+        help_text='风险发生后的影响严重程度，1最低，10最高'
+    )
+    detectability = models.FloatField(
+        default=5,
+        verbose_name='可检测性(1-10)',
+        help_text='风险的可检测程度，1最易检测，10最难检测'
+    )
+    control_measures = models.TextField(
+        blank=True,
+        verbose_name='控制措施'
+    )
+    mitigation_plan = models.TextField(
+        blank=True,
+        verbose_name='缓解方案'
+    )
+    is_monitored = models.BooleanField(
+        default=True,
+        verbose_name='是否监控'
+    )
+    monitoring_method = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='监控方式'
+    )
+    incident_count = models.IntegerField(
+        default=0,
+        verbose_name='发生次数'
+    )
+    related_defect_types = models.ManyToManyField(
+        DefectType,
+        blank=True,
+        related_name='risk_points',
+        verbose_name='关联缺陷类型'
+    )
+    identified_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='识别人'
+    )
+    identified_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='识别时间'
+    )
+    last_updated_by = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='最后更新人'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='备注'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='更新时间'
+    )
+
+    class Meta:
+        verbose_name = '工艺风险点'
+        verbose_name_plural = '工艺风险点'
+        ordering = ['-risk_score', 'category']
+        unique_together = [['recipe', 'risk_code']]
+
+    def __str__(self):
+        return f'{self.recipe.recipe_code} - {self.risk_name}'
+
+    @property
+    def risk_color_class(self):
+        mapping = {
+            self.RISK_LEVEL_LOW: 'badge-success',
+            self.RISK_LEVEL_MEDIUM: 'badge-warning',
+            self.RISK_LEVEL_HIGH: 'badge-danger',
+            self.RISK_LEVEL_CRITICAL: 'badge-danger',
+        }
+        return mapping.get(self.risk_level, 'badge-gray')
+
+    def save(self, *args, **kwargs):
+        self.risk_score = round(
+            (self.likelihood * self.severity * self.detectability) / 10, 2
+        )
+        if self.risk_score < 30:
+            self.risk_level = self.RISK_LEVEL_LOW
+        elif self.risk_score < 60:
+            self.risk_level = self.RISK_LEVEL_MEDIUM
+        elif self.risk_score < 85:
+            self.risk_level = self.RISK_LEVEL_HIGH
+        else:
+            self.risk_level = self.RISK_LEVEL_CRITICAL
+        super().save(*args, **kwargs)
+
+
+class QualityTrendRecord(models.Model):
+    TREND_TYPE_DAILY = 'daily'
+    TREND_TYPE_WEEKLY = 'weekly'
+    TREND_TYPE_MONTHLY = 'monthly'
+
+    TREND_TYPE_CHOICES = [
+        (TREND_TYPE_DAILY, '每日'),
+        (TREND_TYPE_WEEKLY, '每周'),
+        (TREND_TYPE_MONTHLY, '每月'),
+    ]
+
+    record_date = models.DateField(
+        verbose_name='记录日期'
+    )
+    trend_type = models.CharField(
+        max_length=20,
+        choices=TREND_TYPE_CHOICES,
+        default=TREND_TYPE_DAILY,
+        verbose_name='趋势类型'
+    )
+    total_batches = models.IntegerField(
+        default=0,
+        verbose_name='总批次数'
+    )
+    new_batches = models.IntegerField(
+        default=0,
+        verbose_name='新增批次数'
+    )
+    defect_count = models.IntegerField(
+        default=0,
+        verbose_name='缺陷总数'
+    )
+    defect_rate = models.FloatField(
+        default=0,
+        verbose_name='缺陷率(%)'
+    )
+    fracture_count = models.IntegerField(
+        default=0,
+        verbose_name='断裂次数'
+    )
+    fracture_rate = models.FloatField(
+        default=0,
+        verbose_name='断裂率(%)'
+    )
+    avg_durability_score = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='平均耐久性评分'
+    )
+    avg_stability_score = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='平均稳定性评分'
+    )
+    avg_rebound_rate = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='平均回弹率(%)'
+    )
+    avg_tensile_strength = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='平均抗拉强度(MPa)'
+    )
+    avg_fatigue_cycles = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='平均疲劳循环次数'
+    )
+    quality_score = models.FloatField(
+        default=80,
+        verbose_name='综合质量评分(0-100)',
+        help_text='综合质量评分，越高质量越好'
+    )
+    anomaly_count = models.IntegerField(
+        default=0,
+        verbose_name='异常数据数'
+    )
+    resolved_quality_issues = models.IntegerField(
+        default=0,
+        verbose_name='已解决质量问题数'
+    )
+    open_quality_issues = models.IntegerField(
+        default=0,
+        verbose_name='待解决质量问题数'
+    )
+    category_distribution = models.JSONField(
+        default=dict,
+        verbose_name='缺陷类别分布'
+    )
+    top_defect_types = models.JSONField(
+        default=list,
+        verbose_name='主要缺陷类型'
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name='备注'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+
+    class Meta:
+        verbose_name = '质量趋势记录'
+        verbose_name_plural = '质量趋势记录'
+        ordering = ['-record_date']
+        unique_together = [['record_date', 'trend_type']]
+
+    def __str__(self):
+        return f'{self.record_date} - {self.get_trend_type_display()}'
+
+
+class TraceabilityLink(models.Model):
+    LINK_TYPE_MATERIAL = 'material'
+    LINK_TYPE_PROCESS = 'process'
+    LINK_TYPE_TEST = 'test'
+    LINK_TYPE_DEFECT = 'defect'
+    LINK_TYPE_DIAGNOSIS = 'diagnosis'
+
+    LINK_TYPE_CHOICES = [
+        (LINK_TYPE_MATERIAL, '材料批次'),
+        (LINK_TYPE_PROCESS, '工艺配方'),
+        (LINK_TYPE_TEST, '测试记录'),
+        (LINK_TYPE_DEFECT, '缺陷记录'),
+        (LINK_TYPE_DIAGNOSIS, '断裂诊断'),
+    ]
+
+    batch = models.ForeignKey(
+        MaterialBatch,
+        on_delete=models.CASCADE,
+        related_name='traceability_links',
+        verbose_name='材料批次'
+    )
+    link_type = models.CharField(
+        max_length=30,
+        choices=LINK_TYPE_CHOICES,
+        verbose_name='链路类型'
+    )
+    link_id = models.IntegerField(
+        verbose_name='关联记录ID'
+    )
+    link_title = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name='链路标题'
+    )
+    link_description = models.TextField(
+        blank=True,
+        verbose_name='链路描述'
+    )
+    sequence = models.IntegerField(
+        default=0,
+        verbose_name='顺序'
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='创建时间'
+    )
+
+    class Meta:
+        verbose_name = '追溯链路'
+        verbose_name_plural = '追溯链路'
+        ordering = ['batch', 'sequence', '-created_at']
+
+    def __str__(self):
+        return f'{self.batch.batch_number} - {self.get_link_type_display()}'

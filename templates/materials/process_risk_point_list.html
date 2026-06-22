@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+
+{% block title %}工艺风险点 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<style>
+    .risk-progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #e5e7eb;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .risk-progress-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s;
+    }
+    .risk-progress-fill.low { background: #16a34a; }
+    .risk-progress-fill.medium { background: #f59e0b; }
+    .risk-progress-fill.high { background: #dc2626; }
+    .risk-progress-fill.critical { background: #7c2d12; }
+    .risk-score-text {
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 4px;
+    }
+</style>
+
+<div class="page-header">
+    <h1>📊 工艺风险点</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:quality_traceability_dashboard' %}" class="btn btn-secondary">返回仪表盘</a>
+    </div>
+</div>
+
+<div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+    <div class="stat-card">
+        <div class="stat-label">总风险点</div>
+        <div class="stat-value">{{ risk_summary.total }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">高风险</div>
+        <div class="stat-value">{{ risk_summary.high }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">中风险</div>
+        <div class="stat-value">{{ risk_summary.medium }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">低风险</div>
+        <div class="stat-value">{{ risk_summary.low }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">工艺风险点列表</div>
+    <div class="filter-bar">
+        <form method="get" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <div>
+                <label>类别：</label>
+                <select name="category" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for cat_val, cat_label in category_choices %}
+                    <option value="{{ cat_val }}" {% if request.GET.category == cat_val|stringformat:"s" %}selected{% endif %}>{{ cat_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>风险等级：</label>
+                <select name="level" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for level_val, level_label in level_choices %}
+                    <option value="{{ level_val }}" {% if request.GET.level == level_val|stringformat:"s" %}selected{% endif %}>{{ level_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <a href="{% url 'materials:process_risk_point_list' %}" class="btn btn-sm btn-secondary">重置</a>
+        </form>
+    </div>
+
+    {% if risk_points %}
+    <table>
+        <thead>
+            <tr>
+                <th>风险编码</th>
+                <th>名称</th>
+                <th>类别</th>
+                <th>风险等级</th>
+                <th>风险评分</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for risk in risk_points %}
+            <tr>
+                <td><a href="{% url 'materials:process_risk_point_detail' risk.pk %}"><strong>{{ risk.risk_code }}</strong></a></td>
+                <td>{{ risk.risk_name }}</td>
+                <td>{{ risk.get_category_display }}</td>
+                <td><span class="badge {{ risk.risk_color_class }}">{{ risk.get_risk_level_display }}</span></td>
+                <td style="min-width: 180px;">
+                    <div class="risk-progress-bar">
+                        <div class="risk-progress-fill {{ risk.risk_level }}" style="width: {{ risk.risk_score }}%;"></div>
+                    </div>
+                    <div class="risk-score-text">{{ risk.risk_score }} 分</div>
+                </td>
+                <td>
+                    <a href="{% url 'materials:process_risk_point_detail' risk.pk %}" class="btn btn-sm btn-primary">详情</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if is_paginated %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?page=1{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.level %}&level={{ request.GET.level }}{% endif %}">首页</a>
+        <a href="?page={{ page_obj.previous_page_number }}{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.level %}&level={{ request.GET.level }}{% endif %}">上一页</a>
+        {% endif %}
+        <span>第 {{ page_obj.number }} / {{ paginator.num_pages }} 页</span>
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.level %}&level={{ request.GET.level }}{% endif %}">下一页</a>
+        <a href="?page={{ paginator.num_pages }}{% if request.GET.category %}&category={{ request.GET.category }}{% endif %}{% if request.GET.level %}&level={{ request.GET.level }}{% endif %}">末页</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>暂无工艺风险点记录</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

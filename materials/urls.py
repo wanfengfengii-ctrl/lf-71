@@ -68,4 +68,42 @@ urlpatterns = [
     path('api/recipe-compare/', views.ApiRecipeCompareView.as_view(), name='api_recipe_compare'),
     path('api/trial-analysis/<int:pk>/', views.ApiTrialAnalysisView.as_view(), name='api_trial_analysis'),
     path('api/recipe-suggestions/<int:pk>/', views.ApiRecipeSuggestionsView.as_view(), name='api_recipe_suggestions'),
+
+    path('quality-traceability/', views.QualityTraceabilityDashboardView.as_view(), name='quality_traceability_dashboard'),
+    path('batches/<int:pk>/traceability/', views.TraceabilityChainView.as_view(), name='traceability_chain'),
+
+    path('defect-types/', views.DefectTypeListView.as_view(), name='defect_type_list'),
+    path('defect-types/create/', views.DefectTypeCreateView.as_view(), name='defect_type_create'),
+    path('defect-types/<int:pk>/edit/', views.DefectTypeUpdateView.as_view(), name='defect_type_edit'),
+    path('defect-types/<int:pk>/delete/', views.DefectTypeDeleteView.as_view(), name='defect_type_delete'),
+
+    path('defect-records/', views.DefectRecordListView.as_view(), name='defect_record_list'),
+    path('defect-records/<int:pk>/', views.DefectRecordDetailView.as_view(), name='defect_record_detail'),
+    path('batches/<int:batch_pk>/defect-records/add/', views.DefectRecordCreateView.as_view(), name='defect_record_create'),
+    path('defect-records/<int:pk>/edit/', views.DefectRecordUpdateView.as_view(), name='defect_record_edit'),
+    path('defect-records/<int:pk>/resolve/', views.DefectRecordResolveView.as_view(), name='defect_record_resolve'),
+
+    path('fracture-diagnoses/', views.FractureDiagnosisListView.as_view(), name='fracture_diagnosis_list'),
+    path('fracture-diagnoses/<int:pk>/', views.FractureDiagnosisDetailView.as_view(), name='fracture_diagnosis_detail'),
+    path('batches/<int:batch_pk>/fracture-diagnoses/add/', views.FractureDiagnosisCreateView.as_view(), name='fracture_diagnosis_create'),
+    path('fracture-diagnoses/<int:pk>/edit/', views.FractureDiagnosisUpdateView.as_view(), name='fracture_diagnosis_edit'),
+    path('fracture-diagnoses/<int:pk>/complete/', views.FractureDiagnosisCompleteView.as_view(), name='fracture_diagnosis_complete'),
+
+    path('quality-issues/', views.QualityIssueListView.as_view(), name='quality_issue_list'),
+    path('quality-issues/<int:pk>/', views.QualityIssueDetailView.as_view(), name='quality_issue_detail'),
+    path('quality-issues/create/', views.QualityIssueCreateView.as_view(), name='quality_issue_create'),
+    path('quality-issues/<int:pk>/edit/', views.QualityIssueUpdateView.as_view(), name='quality_issue_edit'),
+    path('quality-issues/<int:pk>/add-batch/', views.QualityIssueAddBatchView.as_view(), name='quality_issue_add_batch'),
+    path('quality-issues/<int:pk>/remove-batch/<int:batch_id>/', views.QualityIssueRemoveBatchView.as_view(), name='quality_issue_remove_batch'),
+
+    path('risk-points/', views.ProcessRiskPointListView.as_view(), name='process_risk_point_list'),
+    path('risk-points/<int:pk>/', views.ProcessRiskPointDetailView.as_view(), name='process_risk_point_detail'),
+    path('recipes/<int:recipe_pk>/risk-points/add/', views.ProcessRiskPointCreateView.as_view(), name='process_risk_point_create'),
+    path('risk-points/<int:pk>/edit/', views.ProcessRiskPointUpdateView.as_view(), name='process_risk_point_edit'),
+
+    path('quality-trend/', views.QualityTrendView.as_view(), name='quality_trend'),
+
+    path('api/quality-dashboard/', views.ApiQualityDashboardView.as_view(), name='api_quality_dashboard'),
+    path('api/defect-distribution/', views.ApiDefectDistributionView.as_view(), name='api_defect_distribution'),
+    path('api/risk-analysis/', views.ApiRiskAnalysisView.as_view(), name='api_risk_analysis'),
 ]

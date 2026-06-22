@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+
+{% block title %}质量问题 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>⚠️ 质量问题</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:quality_traceability_dashboard' %}" class="btn btn-secondary">返回仪表盘</a>
+        <a href="{% url 'materials:quality_issue_create' %}" class="btn btn-primary">新建问题</a>
+    </div>
+</div>
+
+<div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+    <div class="stat-card">
+        <div class="stat-label">总问题数</div>
+        <div class="stat-value">{{ issue_summary.total }}</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-label">待处理</div>
+        <div class="stat-value">{{ issue_summary.open }}</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-label">处理中</div>
+        <div class="stat-value">{{ issue_summary.investigating }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">已关闭</div>
+        <div class="stat-value">{{ issue_summary.closed }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">质量问题列表</div>
+    <div class="filter-bar">
+        <form method="get" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <div>
+                <label>类型：</label>
+                <select name="type" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for type_val, type_label in type_choices %}
+                    <option value="{{ type_val }}" {% if request.GET.type == type_val|stringformat:"s" %}selected{% endif %}>{{ type_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>优先级：</label>
+                <select name="priority" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for pri_val, pri_label in priority_choices %}
+                    <option value="{{ pri_val }}" {% if request.GET.priority == pri_val|stringformat:"s" %}selected{% endif %}>{{ pri_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>状态：</label>
+                <select name="status" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for st_val, st_label in status_choices %}
+                    <option value="{{ st_val }}" {% if request.GET.status == st_val|stringformat:"s" %}selected{% endif %}>{{ st_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <a href="{% url 'materials:quality_issue_list' %}" class="btn btn-sm btn-secondary">重置</a>
+        </form>
+    </div>
+
+    {% if quality_issues %}
+    <table>
+        <thead>
+            <tr>
+                <th>问题编号</th>
+                <th>标题</th>
+                <th>类型</th>
+                <th>优先级</th>
+                <th>状态</th>
+                <th>关联批次数</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in quality_issues %}
+            <tr>
+                <td><a href="{% url 'materials:quality_issue_detail' issue.pk %}"><strong>{{ issue.issue_code }}</strong></a></td>
+                <td>{{ issue.issue_title }}</td>
+                <td>{{ issue.get_issue_type_display }}</td>
+                <td><span class="badge {{ issue.priority_color_class }}">{{ issue.get_priority_display }}</span></td>
+                <td><span class="badge {{ issue.status_color_class }}">{{ issue.get_status_display }}</span></td>
+                <td>{{ issue.affected_batch_count }}</td>
+                <td>{{ issue.created_at|date:"Y-m-d" }}</td>
+                <td>
+                    <a href="{% url 'materials:quality_issue_detail' issue.pk %}" class="btn btn-sm btn-primary">详情</a>
+                    {% if issue.status == 'open' %}
+                    <a href="{% url 'materials:quality_issue_edit' issue.pk %}" class="btn btn-sm btn-success">处理</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if is_paginated %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?page=1{% if request.GET.type %}&type={{ request.GET.type }}{% endif %}{% if request.GET.priority %}&priority={{ request.GET.priority }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}">首页</a>
+        <a href="?page={{ page_obj.previous_page_number }}{% if request.GET.type %}&type={{ request.GET.type }}{% endif %}{% if request.GET.priority %}&priority={{ request.GET.priority }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}">上一页</a>
+        {% endif %}
+        <span>第 {{ page_obj.number }} / {{ paginator.num_pages }} 页</span>
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if request.GET.type %}&type={{ request.GET.type }}{% endif %}{% if request.GET.priority %}&priority={{ request.GET.priority }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}">下一页</a>
+        <a href="?page={{ paginator.num_pages }}{% if request.GET.type %}&type={{ request.GET.type }}{% endif %}{% if request.GET.priority %}&priority={{ request.GET.priority }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}">末页</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>暂无质量问题记录</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,254 @@
+{% extends 'base.html' %}
+
+{% block title %}质量趋势分析 - 弓弦材料测试系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📈 质量趋势分析</h1>
+    <div class="actions-row">
+        <a href="{% url 'materials:quality_traceability_dashboard' %}" class="btn btn-secondary">返回仪表盘</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">分析周期</div>
+        <div class="stat-value" style="font-size: 1.1rem;">近{{ days }}天</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">总缺陷数</div>
+        <div class="stat-value">{{ stats.total_defects }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">总断裂数</div>
+        <div class="stat-value">{{ stats.total_fractures }}</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-label">平均质量评分</div>
+        <div class="stat-value">{{ stats.avg_quality_score|floatformat:1 }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">平均拉伸强度</div>
+        <div class="stat-value">{{ stats.avg_tensile_strength|floatformat:1 }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">平均疲劳寿命</div>
+        <div class="stat-value">{{ stats.avg_fatigue_life|floatformat:0 }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">质量综合趋势</div>
+    <div class="chart-container" id="qualityTrendChart" style="height: 400px;"></div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">缺陷数量趋势</div>
+        <div class="chart-container" id="defectTrendChart" style="height: 300px;"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">断裂数量趋势</div>
+        <div class="chart-container" id="fractureTrendChart" style="height: 300px;"></div>
+    </div>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <div class="card-title">拉伸强度趋势</div>
+        <div class="chart-container" id="tensileTrendChart" style="height: 300px;"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">疲劳寿命趋势</div>
+        <div class="chart-container" id="fatigueTrendChart" style="height: 300px;"></div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">质量趋势记录</div>
+    {% if trend_records %}
+    <table>
+        <thead>
+            <tr>
+                <th>日期</th>
+                <th>趋势类型</th>
+                <th>缺陷数</th>
+                <th>断裂数</th>
+                <th>平均拉伸强度</th>
+                <th>平均疲劳寿命</th>
+                <th>综合质量评分</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for record in trend_records %}
+            <tr>
+                <td>{{ record.record_date|date:"Y-m-d" }}</td>
+                <td>{{ record.get_trend_type_display }}</td>
+                <td>{{ record.defect_count }}</td>
+                <td>{{ record.fracture_count }}</td>
+                <td>{{ record.avg_tensile_strength|floatformat:1 }}</td>
+                <td>{{ record.avg_fatigue_life|floatformat:0 }}</td>
+                <td>
+                    <strong{% if record.quality_score >= 80 %} class="text-green"{% elif record.quality_score >= 60 %} class="text-orange"{% else %} class="text-red"{% endif %}>
+                        {{ record.quality_score|floatformat:1 }}
+                    </strong>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无质量趋势记录</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    const trendData = {{ trend_data_json|safe }};
+
+    function renderLineChart(containerId, data, labels, colors, yLabel) {
+        const container = document.getElementById(containerId);
+        if (!container || data.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>暂无数据</p></div>';
+            return;
+        }
+
+        const width = container.clientWidth - 20;
+        const height = container.offsetHeight || 300;
+        const padding = { top: 20, right: 20, bottom: 40, left: 50 };
+        const chartWidth = width - padding.left - padding.right;
+        const chartHeight = height - padding.top - padding.bottom;
+
+        const maxVal = Math.max(...data, 1);
+        const minVal = Math.min(...data, 0);
+        const range = maxVal - minVal || 1;
+
+        const xStep = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
+
+        let svg = `<svg width="100%" height="${height}" viewBox="0 0 ${width} ${height}">`;
+
+        for (let i = 0; i <= 5; i++) {
+            const y = padding.top + (chartHeight / 5) * i;
+            const val = maxVal - (range / 5) * i;
+            svg += `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="#e5e7eb" stroke-width="1"/>`;
+            svg += `<text x="${padding.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#6b7280">${val.toFixed(0)}</text>`;
+        }
+
+        let path = '';
+        data.forEach((val, i) => {
+            const x = padding.left + xStep * i;
+            const y = padding.top + chartHeight - ((val - minVal) / range) * chartHeight;
+            if (i === 0) path += `M ${x} ${y}`;
+            else path += ` L ${x} ${y}`;
+        });
+        svg += `<path d="${path}" fill="none" stroke="${colors.stroke}" stroke-width="2"/>`;
+
+        data.forEach((val, i) => {
+            const x = padding.left + xStep * i;
+            const y = padding.top + chartHeight - ((val - minVal) / range) * chartHeight;
+            svg += `<circle cx="${x}" cy="${y}" r="3" fill="${colors.fill}"/>`;
+        });
+
+        const labelStep = Math.ceil(labels.length / 6);
+        labels.forEach((label, i) => {
+            if (i % labelStep === 0 || i === labels.length - 1) {
+                const x = padding.left + xStep * i;
+                svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle" font-size="10" fill="#6b7280">${label.slice(5)}</text>`;
+            }
+        });
+
+        svg += '</svg>';
+        container.innerHTML = svg;
+    }
+
+    function renderMultiLineChart(containerId, datasets, labels) {
+        const container = document.getElementById(containerId);
+        if (!container || datasets.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>暂无数据</p></div>';
+            return;
+        }
+
+        const width = container.clientWidth - 20;
+        const height = container.offsetHeight || 400;
+        const padding = { top: 30, right: 80, bottom: 40, left: 50 };
+        const chartWidth = width - padding.left - padding.right;
+        const chartHeight = height - padding.top - padding.bottom;
+
+        let allValues = [];
+        datasets.forEach(ds => allValues = allValues.concat(ds.data));
+        const maxVal = Math.max(...allValues, 1);
+        const minVal = Math.min(...allValues, 0);
+        const range = maxVal - minVal || 1;
+
+        const xStep = labels.length > 1 ? chartWidth / (labels.length - 1) : chartWidth;
+
+        let svg = `<svg width="100%" height="${height}" viewBox="0 0 ${width} ${height}">`;
+
+        for (let i = 0; i <= 5; i++) {
+            const y = padding.top + (chartHeight / 5) * i;
+            const val = maxVal - (range / 5) * i;
+            svg += `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="#e5e7eb" stroke-width="1"/>`;
+            svg += `<text x="${padding.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#6b7280">${val.toFixed(0)}</text>`;
+        }
+
+        datasets.forEach((ds, idx) => {
+            let path = '';
+            ds.data.forEach((val, i) => {
+                const x = padding.left + xStep * i;
+                const y = padding.top + chartHeight - ((val - minVal) / range) * chartHeight;
+                if (i === 0) path += `M ${x} ${y}`;
+                else path += ` L ${x} ${y}`;
+            });
+            svg += `<path d="${path}" fill="none" stroke="${ds.color}" stroke-width="2"/>`;
+
+            ds.data.forEach((val, i) => {
+                const x = padding.left + xStep * i;
+                const y = padding.top + chartHeight - ((val - minVal) / range) * chartHeight;
+                svg += `<circle cx="${x}" cy="${y}" r="3" fill="${ds.color}"/>`;
+            });
+
+            const legendY = padding.top + idx * 20;
+            svg += `<rect x="${width - padding.right + 10}" y="${legendY}" width="10" height="10" fill="${ds.color}"/>`;
+            svg += `<text x="${width - padding.right + 25}" y="${legendY + 9}" font-size="11" fill="#4b5563">${ds.label}</text>`;
+        });
+
+        const labelStep = Math.ceil(labels.length / 6);
+        labels.forEach((label, i) => {
+            if (i % labelStep === 0 || i === labels.length - 1) {
+                const x = padding.left + xStep * i;
+                svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle" font-size="10" fill="#6b7280">${label.slice(5)}</text>`;
+            }
+        });
+
+        svg += '</svg>';
+        container.innerHTML = svg;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const dates = trendData.dates || [];
+        const defectCounts = trendData.defect_counts || [];
+        const fractureCounts = trendData.fracture_counts || [];
+        const qualityScores = trendData.quality_scores || [];
+        const tensileStrengths = trendData.tensile_strengths || [];
+        const fatigueLives = trendData.fatigue_lives || [];
+
+        renderMultiLineChart('qualityTrendChart', [
+            { label: '质量评分', data: qualityScores, color: '#10b981' },
+            { label: '缺陷数', data: defectCounts, color: '#ef4444' },
+            { label: '断裂数', data: fractureCounts, color: '#f59e0b' }
+        ], dates);
+
+        renderLineChart('defectTrendChart', defectCounts, dates, { stroke: '#ef4444', fill: '#ef4444' }, '缺陷数');
+        renderLineChart('fractureTrendChart', fractureCounts, dates, { stroke: '#f59e0b', fill: '#f59e0b' }, '断裂数');
+        renderLineChart('tensileTrendChart', tensileStrengths, dates, { stroke: '#3b82f6', fill: '#3b82f6' }, '拉伸强度(MPa)');
+        renderLineChart('fatigueTrendChart', fatigueLives, dates, { stroke: '#8b5cf6', fill: '#8b5cf6' }, '疲劳寿命(次)');
+    });
+</script>
+
+<style>
+    .text-green { color: #10b981; }
+    .text-orange { color: #f59e0b; }
+    .text-red { color: #ef4444; }
+</style>
+{% endblock %}
